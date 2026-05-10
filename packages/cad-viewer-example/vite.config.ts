@@ -6,10 +6,16 @@ import { visualizer } from 'rollup-plugin-visualizer'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig(({ command, mode }) => {
-  const aliases: Alias[] = []
+  const aliases: Alias[] = [
+    {
+      find: /^@mlightcad\/cad-viewer$/,
+      replacement: resolve(__dirname, '../cad-viewer/src')
+    }
+  ]
+
   if (command === 'serve') {
     aliases.push({
-      find: /^@mlightcad\/(svg-renderer|three-renderer|cad-simple-viewer|cad-viewer)$/,
+      find: /^@mlightcad\/(svg-renderer|three-renderer|cad-simple-viewer)$/,
       replacement: resolve(__dirname, '../$1/src')
     })
   }
