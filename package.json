@@ -15,7 +15,7 @@
   "scripts": {
     "analyze": "nx run-many -t analyze",
     "build": "nx run-many -t build",
-    "build:vercel": "pnpm --filter @mlightcad/svg-renderer build && pnpm --filter @mlightcad/three-renderer build && pnpm --filter @mlightcad/cad-simple-viewer build && pnpm --filter @mlightcad/cad-viewer-example exec vite build",
+    "build:vercel": "pnpm --filter @mlightcad/svg-renderer build && pnpm --filter @mlightcad/three-renderer build && pnpm --filter @mlightcad/cad-simple-viewer build && pnpm --filter @mlightcad/cad-viewer-example exec vite build && node tools/prepare-vercel-output.mjs",
     "clean": "nx run-many -t clean",
     "dev": "nx run @mlightcad/cad-viewer-example:dev",
     "dev:simple": "nx run @mlightcad/cad-simple-viewer-example:dev",

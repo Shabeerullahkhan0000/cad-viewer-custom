@@ -1,7 +1,7 @@
 {
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm -w run build:vercel",
-  "outputDirectory": "packages/cad-viewer-example/dist",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/(.*)",
