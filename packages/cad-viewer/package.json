@@ -38,6 +38,7 @@
     "dev": "vite",
     "clean": "rimraf dist lib tsconfig.tsbuildinfo",
     "build": "vue-tsc && vite build",
+    "build:vercel": "pnpm -w run build:vercel",
     "preview": "vite preview",
     "lint": "eslint src/",
     "lint:fix": "eslint --fix --quiet src/"

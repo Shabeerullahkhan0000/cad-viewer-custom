@@ -9,6 +9,7 @@
   },
   "scripts": {
     "pre-serve": "node ./copyDist.js",
+    "build:vercel": "pnpm -w run build:vercel",
     "serve": "npm run pre-serve && serve ./public/"
   },
   "devDependencies": {
