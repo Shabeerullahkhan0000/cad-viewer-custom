@@ -16,24 +16,7 @@
         <p class="upload-description">
           Drop file here or <em>click to select</em>
         </p>
-        <div>
-          <el-radio-group v-model="selectedMode" class="mode-radio-group">
-            <el-radio :value="0" border>Read</el-radio>
-            <el-radio :value="4" border>Review</el-radio>
-            <el-radio :value="8" border>Write</el-radio>
-          </el-radio-group>
-          <div class="mode-description">
-            <p v-if="selectedMode === 0" class="mode-info">
-              <strong>Read:</strong> View-only access
-            </p>
-            <p v-else-if="selectedMode === 4" class="mode-info">
-              <strong>Review:</strong> View and review access
-            </p>
-            <p v-else-if="selectedMode === 8" class="mode-info">
-              <strong>Write:</strong> Full read/write access
-            </p>
-          </div>
-        </div>
+        <p class="mode-info">Full write access enabled</p>
       </div>
       <template #tip>
         <div class="el-upload__tip">Supported formats: DWG, DXF</div>
@@ -44,23 +27,19 @@
 
 <script setup lang="ts">
 import { UploadFilled } from '@element-plus/icons-vue'
-import { AcEdOpenMode } from '@mlightcad/cad-simple-viewer'
 import { log } from '@mlightcad/data-model'
 import type { UploadFile, UploadProps } from 'element-plus'
-import { ref } from 'vue'
 
 interface Props {
-  onFileSelect: (file: File, mode: AcEdOpenMode) => void
+  onFileSelect: (file: File) => void
 }
 
 const props = defineProps<Props>()
 
-const selectedMode = ref<AcEdOpenMode>(AcEdOpenMode.Write)
-
 const handleFileChange: UploadProps['onChange'] = (uploadFile: UploadFile) => {
   if (uploadFile.raw) {
     if (isValidFile(uploadFile.raw)) {
-      props.onFileSelect(uploadFile.raw, selectedMode.value)
+      props.onFileSelect(uploadFile.raw)
     }
   }
 }
@@ -161,31 +140,10 @@ const isValidFile = (file: File): boolean => {
   text-align: center;
 }
 
-.mode-radio-group {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.mode-radio-group :deep(.el-radio) {
-  margin-right: 0;
-  margin-bottom: 0;
-}
-
-.mode-description {
-  margin-top: 12px;
-}
-
 .mode-info {
   margin: 0;
   font-size: 14px;
   color: #606266;
   line-height: 1.6;
-}
-
-.mode-info strong {
-  color: #409eff;
-  font-weight: 600;
 }
 </style>

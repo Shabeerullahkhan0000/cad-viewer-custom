@@ -1,4 +1,5 @@
 import {
+  AcDbBlockReference,
   AcDbEntity,
   acdbHostApplicationServices,
   AcDbLayerTableRecord,
@@ -6,6 +7,7 @@ import {
   AcDbLayout,
   AcDbObjectId,
   AcDbRasterImage,
+  AcDbRenderingCache,
   AcDbRay,
   AcDbSysVarManager,
   AcDbViewport,
@@ -1014,7 +1016,30 @@ export class AcTrView2d extends AcEdBaseView {
   }
 
   private drawEntity(entity: AcDbEntity, delay?: boolean) {
+    if (this.isAnonymousBlockReference(entity)) {
+      AcDbRenderingCache.instance.clear()
+      try {
+        return entity.worldDraw(this._renderer, delay) as AcTrEntity | null
+      } finally {
+        AcDbRenderingCache.instance.clear()
+      }
+    }
     return entity.worldDraw(this._renderer, delay) as AcTrEntity | null
+  }
+
+  /**
+   * Anonymous AutoCAD blocks (`*U...`) commonly represent evaluated dynamic
+   * block states. The upstream data-model cache currently intends to skip
+   * these blocks, but its guard does not use the active block record name, so
+   * stale anonymous graphics can be reused across block references.
+   */
+  private isAnonymousBlockReference(
+    entity: AcDbEntity
+  ): entity is AcDbBlockReference {
+    return (
+      entity instanceof AcDbBlockReference &&
+      entity.blockName.toUpperCase().startsWith('*U')
+    )
   }
 
   /**

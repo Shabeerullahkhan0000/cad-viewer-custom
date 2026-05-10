@@ -4,7 +4,6 @@ import {
   AcTrRenderer,
   AcTrViewportView
 } from '@mlightcad/three-renderer'
-import { AxesGizmo, ObjectPosition } from '@mlightcad/three-viewcube'
 import * as THREE from 'three'
 
 import { AcEdViewMode } from '../editor/view/AcEdBaseView'
@@ -44,8 +43,6 @@ export interface AcDbEntityEventArgs {
 export class AcTrLayoutView extends AcTrBaseView {
   /** The block table record ID associated with this layout */
   private _layoutBtrId: string
-  /** The axes gizmo for showing coordinate system orientation */
-  private _axesGizmo: AxesGizmo
   /** The current view mode (selection, pan, etc.) */
   private _mode: AcEdViewMode
   /** Map of viewport views indexed by viewport ID */
@@ -68,7 +65,6 @@ export class AcTrLayoutView extends AcTrBaseView {
     super(renderer, width, height)
     this._layoutBtrId = layoutBtrId
     this._mode = AcEdViewMode.SELECTION
-    this._axesGizmo = this.createAxesGizmo()
     this._viewportViews = new Map()
   }
 
@@ -181,26 +177,6 @@ export class AcTrLayoutView extends AcTrBaseView {
     if (modelSpaceLayout) {
       this.drawViewports(modelSpaceLayout.internalObject)
     }
-    this._axesGizmo?.update()
-  }
-
-  /**
-   * Creates and configures the axes gizmo for this view.
-   * The gizmo shows the current coordinate system orientation and is positioned
-   * at the bottom-left of the view without a Z-axis (2D view).
-   *
-   * @returns The configured axes gizmo instance
-   */
-  private createAxesGizmo() {
-    const axesGizmo = new AxesGizmo(
-      this._camera.internalCamera,
-      this._renderer.internalRenderer,
-      {
-        hasZAxis: false,
-        pos: ObjectPosition.LEFT_BOTTOM
-      }
-    )
-    return axesGizmo
   }
 
   /**

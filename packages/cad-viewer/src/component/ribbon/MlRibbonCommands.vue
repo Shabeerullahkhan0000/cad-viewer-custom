@@ -100,7 +100,6 @@ import {
   xline
 } from '../../svg'
 import MlLayerSelect from '../common/MlLayerSelect.vue'
-import MlRibbonLanguageSelector from './MlRibbonLanguageSelector.vue'
 import MlRibbonPropertyColorDropdown from './MlRibbonPropertyColorDropdown.vue'
 import MlRibbonPropertyLineTypeSelect from './MlRibbonPropertyLineTypeSelect.vue'
 import MlRibbonPropertyLineWeightSelect from './MlRibbonPropertyLineWeightSelect.vue'
@@ -1514,13 +1513,6 @@ const handleFileMenuSelect = (command: string) => {
       @file-menu-select="handleFileMenuSelect"
       @item-click="handleRibbonItemClick"
     >
-      <template #tabs-extra="{ disabled }">
-        <ml-ribbon-language-selector
-          v-if="features.isShowLanguageSelector"
-          :current-locale="props.currentLocale"
-          :disabled="disabled"
-        />
-      </template>
     </ml-ribbon>
   </div>
 </template>

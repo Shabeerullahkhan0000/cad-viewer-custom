@@ -111,7 +111,6 @@ import { MlDialogManager, MlFileReader } from './common'
 import {
   MlEntityDrawStyleToolbar,
   MlEntityInfo,
-  MlLanguageSelector,
   MlMainMenu,
   MlToolBars
 } from './layout'
@@ -564,10 +563,6 @@ const closeNotificationCenter = () => {
             :current-locale="effectiveLocale"
           />
           <ml-main-menu v-if="!isWriteMode" />
-          <ml-language-selector
-            v-if="!isWriteMode"
-            :current-locale="effectiveLocale"
-          />
         </header>
 
         <!-- Main content area with CAD viewing tools and controls -->
@@ -609,9 +604,7 @@ const closeNotificationCenter = () => {
           <ml-dialog-manager v-if="editorRef" />
         </main>
 
-        <!-- Footer section with command line and status information -->
         <footer v-if="editorRef" class="ml-cad-footer">
-          <!-- Status bar with progress, settings, and theme controls -->
           <ml-status-bar
             :is-dark="isDark"
             :toggle-dark="toggleDark"

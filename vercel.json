@@ -1,0 +1,5 @@
+{
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "NX_DAEMON=false pnpm exec nx run @mlightcad/cad-simple-viewer-example:build",
+  "outputDirectory": "packages/cad-simple-viewer-example/dist"
+}

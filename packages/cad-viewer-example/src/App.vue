@@ -19,14 +19,13 @@
 </template>
 
 <script setup lang="ts">
-// import { AcApSettingManager } from '@mlightcad/cad-simple-viewer'
 import {
   AcApDocManager,
+  AcApSettingManager,
   AcEdCommandStack,
   AcEdOpenMode
 } from '@mlightcad/cad-simple-viewer'
 import { MlCadViewer } from '@mlightcad/cad-viewer'
-import { ref } from 'vue'
 
 import { AcApQuitCmd } from './commands'
 import FileUpload from './components/FileUpload.vue'
@@ -52,17 +51,16 @@ const initialize = () => {
 
 // Decide whether to show command line vertical toolbar at the right side,
 // performance stats, coordinates in status bar, etc.
-// AcApSettingManager.instance.isShowCommandLine = false
+AcApSettingManager.instance.isShowCommandLine = false
 // AcApSettingManager.instance.isShowToolbar = false
 // AcApSettingManager.instance.isShowStats = false
 // AcApSettingManager.instance.isShowCoordinate = false
 
-const selectedMode = ref<AcEdOpenMode>(AcEdOpenMode.Read)
+const selectedMode = AcEdOpenMode.Write
 
 // Handle file selection from upload component
-const handleFileSelect = (file: File, mode: AcEdOpenMode) => {
+const handleFileSelect = (file: File) => {
   store.selectedFile = file
-  selectedMode.value = mode
 }
 </script>
 

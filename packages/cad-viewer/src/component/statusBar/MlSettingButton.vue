@@ -11,12 +11,6 @@
             {{ t('main.statusBar.setting.stats') }}
           </el-dropdown-item>
           <el-dropdown-item
-            :icon="features.isShowCommandLine ? Check : ''"
-            command="isShowCommandLine"
-          >
-            {{ t('main.statusBar.setting.commandLine') }}
-          </el-dropdown-item>
-          <el-dropdown-item
             :icon="features.isShowFileName ? Check : ''"
             command="isShowFileName"
           >
@@ -33,18 +27,6 @@
             command="isShowMainMenu"
           >
             {{ t('main.statusBar.setting.mainMenu') }}
-          </el-dropdown-item>
-          <el-dropdown-item
-            :icon="features.isShowLanguageSelector ? Check : ''"
-            command="isShowLanguageSelector"
-          >
-            {{ t('main.statusBar.setting.languageSelector') }}
-          </el-dropdown-item>
-          <el-dropdown-item
-            :icon="features.isShowCoordinate ? Check : ''"
-            command="isShowCoordinate"
-          >
-            {{ t('main.statusBar.setting.coordinate') }}
           </el-dropdown-item>
           <el-dropdown-item
             :icon="features.isShowToolbar ? Check : ''"
@@ -69,13 +51,7 @@ const { t } = useI18n()
 const features = useSettings()
 
 const handleCommand = (command: keyof AcApSettings) => {
-  if (command == 'isShowCoordinate') {
-    features.isShowCoordinate = !features.isShowCoordinate
-    AcApSettingManager.instance.isShowCoordinate = features.isShowCoordinate
-  } else if (command == 'isShowCommandLine') {
-    features.isShowCommandLine = !features.isShowCommandLine
-    AcApSettingManager.instance.isShowCommandLine = features.isShowCommandLine
-  } else if (command == 'isShowEntityInfo') {
+  if (command == 'isShowEntityInfo') {
     features.isShowEntityInfo = !features.isShowEntityInfo
     AcApSettingManager.instance.isShowEntityInfo = features.isShowEntityInfo
   } else if (command == 'isShowFileName') {
@@ -84,10 +60,6 @@ const handleCommand = (command: keyof AcApSettings) => {
   } else if (command == 'isShowMainMenu') {
     features.isShowMainMenu = !features.isShowMainMenu
     AcApSettingManager.instance.isShowMainMenu = features.isShowMainMenu
-  } else if (command == 'isShowLanguageSelector') {
-    features.isShowLanguageSelector = !features.isShowLanguageSelector
-    AcApSettingManager.instance.isShowLanguageSelector =
-      features.isShowLanguageSelector
   } else if (command == 'isShowToolbar') {
     features.isShowToolbar = !features.isShowToolbar
     AcApSettingManager.instance.isShowToolbar = features.isShowToolbar
