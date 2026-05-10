@@ -118,12 +118,14 @@ describe('AcTrStyleManager', () => {
     expect(hatchMetadata.drawOrder).toBe(-1)
     expect(hatchMetadata.isBackgroundFill).toBe(false)
     expect(hatchMetadata.isForeground).toBe(true)
+    expect(hatchMaterial.depthWrite).toBe(false)
     expect(hatchMaterial.color.getHex()).toBe(0x000000)
 
     const lineworkFillMetadata = getMaterialMetadata(lineworkFillMaterial)
     expect(lineworkFillMetadata.drawOrder).toBe(0)
     expect(lineworkFillMetadata.isForeground).toBe(true)
     expect(lineworkFillMetadata.isBackgroundFill).toBe(false)
+    expect(lineworkFillMaterial.depthWrite).toBe(true)
     expect(lineworkFillMaterial.color.getHex()).toBe(0x000000)
   })
 
@@ -160,6 +162,7 @@ describe('AcTrStyleManager', () => {
     expect(metadata.drawOrder).toBe(-1)
     expect(metadata.isBackgroundFill).toBe(false)
     expect(metadata.isForeground).toBe(true)
+    expect(material.depthWrite).toBe(false)
   })
 
   it('creates a new patterned hatch material when pattern offset changes', () => {
@@ -232,5 +235,6 @@ describe('AcTrStyleManager', () => {
     const metadata = getMaterialMetadata(material)
     expect(metadata.drawOrder).toBe(-1)
     expect(metadata.isBackgroundFill).toBe(false)
+    expect(material.depthWrite).toBe(false)
   })
 })

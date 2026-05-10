@@ -143,6 +143,9 @@ export class AcTrFillMaterialManager extends AcTrMaterialManager<AcTrFillMateria
     // Store side in userData so getBackSideVariant can check idempotency.
     // Draw-order metadata is stamped by the base material manager from
     // `traits.drawOrder`.
+    if ((traits.drawOrder ?? 0) < 0) {
+      material.depthWrite = false
+    }
     setMaterialMetadata(material, {
       side
     })
