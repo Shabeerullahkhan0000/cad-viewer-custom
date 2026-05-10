@@ -338,7 +338,7 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
    * @inheritdoc
    */
   area(area: AcGeArea2d) {
-    if (this.shouldOutlineSolidFillArea()) {
+    if (this.shouldOutlineBackgroundFillArea()) {
       return this.outlineArea(area)
     }
 
@@ -414,16 +414,17 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
     return entity
   }
 
-  private shouldOutlineSolidFillArea() {
+  private shouldOutlineBackgroundFillArea() {
     const traits = this._subEntityTraits
     const fillType = traits.fillType
     const isBackgroundTier = (traits.drawOrder ?? 0) < 0
-    const isSolidFill =
-      fillType.solidFill &&
-      !fillType.gradient &&
-      (!fillType.definitionLines || fillType.definitionLines.length === 0)
+    const hasValidPatternLines =
+      Array.isArray(fillType.definitionLines) &&
+      fillType.definitionLines.some(line => Array.isArray(line.dashLengths))
+    const isMaskLikeFill =
+      fillType.solidFill || !!fillType.gradient || !hasValidPatternLines
 
-    return isBackgroundTier && isSolidFill
+    return isBackgroundTier && isMaskLikeFill
   }
 
   /**
