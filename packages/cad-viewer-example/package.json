@@ -11,6 +11,7 @@
   "scripts": {
     "analyze": "vite build --mode analyze",
     "build": "vue-tsc && vite build",
+    "build:vercel": "pnpm -w run build:vercel",
     "clean": "rimraf dist lib tsconfig.tsbuildinfo",
     "dev": "vite",
     "test:e2e": "playwright test",
