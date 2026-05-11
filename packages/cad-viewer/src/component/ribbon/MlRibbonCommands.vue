@@ -46,26 +46,7 @@ import {
 import { markComponentConfigRaw } from '../../composable/markComponentConfigRaw'
 import { LocaleProp } from '../../locale'
 import {
-  arcCenterStartAngle,
-  arcCenterStartEnd,
-  arcCenterStartLength,
-  arcStartCenterAngle,
-  arcStartCenterEnd,
-  arcStartCenterLength,
-  arcStartEndAngle,
-  arcStartEndDirection,
-  arcStartEndRadius,
-  arcThreePoints,
-  circleCenterDiameter,
-  circleCenterRadius,
-  circleTanTanRadius,
-  circleTanTanTan,
-  circleThreePoints,
-  circleTwoPoints,
   clearMeasurements,
-  ellipseArc,
-  ellipseCenter,
-  hatch,
   layer,
   layerCurrent,
   layerFreeze,
@@ -77,27 +58,18 @@ import {
   layerUnfreeze,
   layerUnisolate,
   layerUnlock,
-  line,
   measureAngle,
   measureArc,
   measureArea,
   measureDistance,
-  mline,
   move,
   mtext,
-  multiPoints,
-  polygon,
-  polyline,
   properties,
   qselect,
-  ray,
-  rect,
   revCircle,
   revCloud,
   revFreeDraw,
-  revRect,
-  splineFitPoints,
-  xline
+  revRect
 } from '../../svg'
 import MlLayerSelect from '../common/MlLayerSelect.vue'
 import MlRibbonPropertyColorDropdown from './MlRibbonPropertyColorDropdown.vue'
@@ -119,7 +91,7 @@ interface RibbonSysVarChangeEvent {
   name: string
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   currentLocale: undefined
 })
 
@@ -597,28 +569,6 @@ const buildBaseTabs = (
     propertyLineType: t('main.ribbon.tooltip.propertyLineType'),
     propertyLineWeight: t('main.ribbon.tooltip.propertyLineWeight')
   }
-  const ribbonDropdownOptionTooltips = {
-    circleCenterRadius: t('main.ribbon.tooltip.circleOption.centerRadius'),
-    circleCenterDiameter: t('main.ribbon.tooltip.circleOption.centerDiameter'),
-    circleTwoPoint: t('main.ribbon.tooltip.circleOption.twoPoint'),
-    circleThreePoint: t('main.ribbon.tooltip.circleOption.threePoint'),
-    circleTanTanRadius: t('main.ribbon.tooltip.circleOption.tanTanRadius'),
-    circleTanTanTan: t('main.ribbon.tooltip.circleOption.tanTanTan'),
-    arcThreePoint: t('main.ribbon.tooltip.arcOption.threePoint'),
-    arcStartCenterEnd: t('main.ribbon.tooltip.arcOption.startCenterEnd'),
-    arcStartCenterAngle: t('main.ribbon.tooltip.arcOption.startCenterAngle'),
-    arcStartCenterLength: t('main.ribbon.tooltip.arcOption.startCenterLength'),
-    arcStartEndAngle: t('main.ribbon.tooltip.arcOption.startEndAngle'),
-    arcStartEndDirection: t('main.ribbon.tooltip.arcOption.startEndDirection'),
-    arcStartEndRadius: t('main.ribbon.tooltip.arcOption.startEndRadius'),
-    arcCenterStartEnd: t('main.ribbon.tooltip.arcOption.centerStartEnd'),
-    arcCenterStartAngle: t('main.ribbon.tooltip.arcOption.centerStartAngle'),
-    arcCenterStartLength: t('main.ribbon.tooltip.arcOption.centerStartLength'),
-    rectang: t('main.ribbon.tooltip.rectOption.rectangle'),
-    polygon: t('main.ribbon.tooltip.rectOption.polygon'),
-    ellipse: t('main.ribbon.tooltip.ellipseOption.ellipse'),
-    ellipseArc: t('main.ribbon.tooltip.ellipseOption.arc')
-  }
   const ribbonLayerActionTooltips = {
     off: t('main.ribbon.tooltip.layerAction.off'),
     isolate: t('main.ribbon.tooltip.layerAction.isolate'),
@@ -777,266 +727,6 @@ const buildBaseTabs = (
       id: 'home',
       title: t('main.ribbon.tab.home'),
       groups: [
-        {
-          id: 'home-draw',
-          title: t('main.ribbon.group.draw'),
-          orientation: 'row',
-          footerMenuItems: [
-            {
-              id: 'cmd-spline',
-              type: 'button',
-              label: t('main.ribbon.command.spline'),
-              tooltip: ribbonTooltips.spline,
-              props: { icon: splineFitPoints }
-            },
-            {
-              id: 'cmd-mline',
-              type: 'button',
-              label: t('main.ribbon.command.mline'),
-              tooltip: ribbonTooltips.mline,
-              props: { icon: mline }
-            },
-            {
-              id: 'cmd-ray',
-              type: 'button',
-              label: t('main.ribbon.command.ray'),
-              tooltip: ribbonTooltips.ray,
-              props: { icon: ray }
-            },
-            {
-              id: 'cmd-xline',
-              type: 'button',
-              label: t('main.ribbon.command.xline'),
-              tooltip: ribbonTooltips.xline,
-              props: { icon: xline }
-            },
-            {
-              id: 'cmd-point',
-              type: 'button',
-              label: t('main.ribbon.command.point'),
-              tooltip: ribbonTooltips.point,
-              props: { icon: multiPoints }
-            }
-          ],
-          collections: [
-            {
-              id: 'home-draw-main',
-              layout: 'row',
-              items: [
-                {
-                  id: 'cmd-line',
-                  type: 'button',
-                  label: t('main.ribbon.command.line'),
-                  tooltip: ribbonTooltips.line,
-                  size: 'large',
-                  props: { icon: line }
-                },
-                {
-                  id: 'cmd-polyline',
-                  type: 'button',
-                  label: t('main.ribbon.command.polyline'),
-                  tooltip: ribbonTooltips.polyline,
-                  size: 'large',
-                  props: { icon: polyline }
-                },
-                {
-                  id: 'cmd-circle',
-                  type: 'dropdown',
-                  label: t('main.ribbon.command.circle'),
-                  tooltip: ribbonTooltips.circle,
-                  size: 'large',
-                  props: {
-                    icon: circleCenterRadius,
-                    options: [
-                      {
-                        value: 'circle-center-radius',
-                        label: t('main.ribbon.circle.centerRadius'),
-                        tooltip:
-                          ribbonDropdownOptionTooltips.circleCenterRadius,
-                        icon: circleCenterRadius
-                      },
-                      {
-                        value: 'circle-center-diameter',
-                        label: t('main.ribbon.circle.centerDiameter'),
-                        tooltip:
-                          ribbonDropdownOptionTooltips.circleCenterDiameter,
-                        icon: circleCenterDiameter
-                      },
-                      {
-                        value: 'circle-2-point',
-                        label: t('main.ribbon.circle.twoPoint'),
-                        tooltip: ribbonDropdownOptionTooltips.circleTwoPoint,
-                        icon: circleTwoPoints
-                      },
-                      {
-                        value: 'circle-3-point',
-                        label: t('main.ribbon.circle.threePoint'),
-                        tooltip: ribbonDropdownOptionTooltips.circleThreePoint,
-                        icon: circleThreePoints
-                      },
-                      {
-                        value: 'circle-tan-tan-radius',
-                        label: t('main.ribbon.circle.tanTanRadius'),
-                        tooltip:
-                          ribbonDropdownOptionTooltips.circleTanTanRadius,
-                        icon: circleTanTanRadius
-                      },
-                      {
-                        value: 'circle-tan-tan-tan',
-                        label: t('main.ribbon.circle.tanTanTan'),
-                        tooltip: ribbonDropdownOptionTooltips.circleTanTanTan,
-                        icon: circleTanTanTan
-                      }
-                    ]
-                  }
-                },
-                {
-                  id: 'cmd-arc',
-                  type: 'dropdown',
-                  label: t('main.ribbon.command.arc'),
-                  tooltip: ribbonTooltips.arc,
-                  size: 'large',
-                  props: {
-                    icon: arcThreePoints,
-                    options: [
-                      {
-                        value: 'arc-3-point',
-                        label: t('main.ribbon.arc.threePoint'),
-                        tooltip: ribbonDropdownOptionTooltips.arcThreePoint,
-                        icon: arcThreePoints
-                      },
-                      {
-                        value: 'arc-start-center-end',
-                        label: t('main.ribbon.arc.startCenterEnd'),
-                        tooltip: ribbonDropdownOptionTooltips.arcStartCenterEnd,
-                        icon: arcStartCenterEnd
-                      },
-                      {
-                        value: 'arc-start-center-angle',
-                        label: t('main.ribbon.arc.startCenterAngle'),
-                        tooltip:
-                          ribbonDropdownOptionTooltips.arcStartCenterAngle,
-                        icon: arcStartCenterAngle
-                      },
-                      {
-                        value: 'arc-start-center-length',
-                        label: t('main.ribbon.arc.startCenterLength'),
-                        tooltip:
-                          ribbonDropdownOptionTooltips.arcStartCenterLength,
-                        icon: arcStartCenterLength
-                      },
-                      {
-                        value: 'arc-start-end-angle',
-                        label: t('main.ribbon.arc.startEndAngle'),
-                        tooltip: ribbonDropdownOptionTooltips.arcStartEndAngle,
-                        icon: arcStartEndAngle
-                      },
-                      {
-                        value: 'arc-start-end-direction',
-                        label: t('main.ribbon.arc.startEndDirection'),
-                        tooltip:
-                          ribbonDropdownOptionTooltips.arcStartEndDirection,
-                        icon: arcStartEndDirection
-                      },
-                      {
-                        value: 'arc-start-end-radius',
-                        label: t('main.ribbon.arc.startEndRadius'),
-                        tooltip: ribbonDropdownOptionTooltips.arcStartEndRadius,
-                        icon: arcStartEndRadius
-                      },
-                      {
-                        value: 'arc-center-start-end',
-                        label: t('main.ribbon.arc.centerStartEnd'),
-                        tooltip: ribbonDropdownOptionTooltips.arcCenterStartEnd,
-                        icon: arcCenterStartEnd
-                      },
-                      {
-                        value: 'arc-center-start-angle',
-                        label: t('main.ribbon.arc.centerStartAngle'),
-                        tooltip:
-                          ribbonDropdownOptionTooltips.arcCenterStartAngle,
-                        icon: arcCenterStartAngle
-                      },
-                      {
-                        value: 'arc-center-start-length',
-                        label: t('main.ribbon.arc.centerStartLength'),
-                        tooltip:
-                          ribbonDropdownOptionTooltips.arcCenterStartLength,
-                        icon: arcCenterStartLength
-                      }
-                    ]
-                  }
-                }
-              ]
-            },
-            {
-              id: 'home-draw-compact-tools',
-              layout: 'column',
-              rows: 3,
-              items: [
-                {
-                  id: 'cmd-rect',
-                  type: 'dropdown',
-                  label: t('main.ribbon.command.rect'),
-                  tooltip: ribbonTooltips.rect,
-                  hideLabel: true,
-                  size: 'small',
-                  props: {
-                    icon: rect,
-                    options: [
-                      {
-                        value: 'rectang',
-                        label: t('main.ribbon.command.rectangle'),
-                        tooltip: ribbonDropdownOptionTooltips.rectang,
-                        icon: rect
-                      },
-                      {
-                        value: 'polygon',
-                        label: t('main.ribbon.command.polygon'),
-                        tooltip: ribbonDropdownOptionTooltips.polygon,
-                        icon: polygon
-                      }
-                    ]
-                  }
-                },
-                {
-                  id: 'cmd-ellipse',
-                  type: 'dropdown',
-                  label: t('main.ribbon.command.ellipse'),
-                  tooltip: ribbonTooltips.ellipse,
-                  hideLabel: true,
-                  size: 'small',
-                  props: {
-                    icon: ellipseCenter,
-                    options: [
-                      {
-                        value: 'ellipse',
-                        label: t('main.ribbon.ellipse.ellipse'),
-                        tooltip: ribbonDropdownOptionTooltips.ellipse,
-                        icon: ellipseCenter
-                      },
-                      {
-                        value: 'ellipse-arc',
-                        label: t('main.ribbon.ellipse.arc'),
-                        tooltip: ribbonDropdownOptionTooltips.ellipseArc,
-                        icon: ellipseArc
-                      }
-                    ]
-                  }
-                },
-                {
-                  id: 'cmd-hatch',
-                  type: 'button',
-                  label: t('main.ribbon.command.hatch'),
-                  tooltip: ribbonTooltips.hatch,
-                  hideLabel: true,
-                  size: 'small',
-                  props: { icon: hatch }
-                }
-              ]
-            }
-          ]
-        },
         {
           id: 'home-modify',
           title: t('main.ribbon.group.modify'),
