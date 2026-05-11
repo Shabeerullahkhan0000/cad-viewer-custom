@@ -12,7 +12,7 @@
 <script setup lang="ts">
 import { eventBus } from '@mlightcad/cad-simple-viewer'
 import { log } from '@mlightcad/data-model'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import { useFileTypes } from '../../composable/useFileTypes'
 
@@ -39,32 +39,51 @@ const accept = computed(() => {
   return result
 })
 
+const openFileInput = () => {
+  fileInput.value?.click()
+}
+
 onMounted(() => {
-  // Listen for the event to open the file dialog
-  eventBus.on('open-file', () => {
-    fileInput.value?.click() // Trigger the file input
-  })
+  eventBus.on('open-file', openFileInput)
 })
 
+onUnmounted(() => {
+  eventBus.off('open-file', openFileInput)
+})
+
+const readFileAsArrayBuffer = (file: File) => {
+  if (typeof file.arrayBuffer === 'function') {
+    return file.arrayBuffer()
+  }
+
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (event: ProgressEvent<FileReader>) => {
+      const fileContent = event.target?.result
+      if (fileContent) {
+        resolve(fileContent as ArrayBuffer)
+      } else {
+        reject(new Error('Failed to read the file.'))
+      }
+    }
+    reader.onerror = () => reject(new Error('Failed to read the file.'))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
 // Handle file input change and emit file content
-const handleFileChange = (event: Event): void => {
+const handleFileChange = async (event: Event): Promise<void> => {
   const target = event.target as HTMLInputElement
   const selectedFile = target.files?.[0]
 
   if (selectedFile && selectedFile.name) {
-    const reader = new FileReader()
-    reader.readAsArrayBuffer(selectedFile)
-
-    reader.onload = (event: ProgressEvent<FileReader>) => {
-      const fileContent = event.target?.result
-      if (fileContent) {
-        // Emit the file content
-        emit('file-read', selectedFile.name, fileContent)
-      }
-    }
-
-    reader.onerror = () => {
+    try {
+      const fileContent = await readFileAsArrayBuffer(selectedFile)
+      emit('file-read', selectedFile.name, fileContent)
+    } catch {
       log.error('Failed to read the file.')
+    } finally {
+      target.value = ''
     }
   }
 }

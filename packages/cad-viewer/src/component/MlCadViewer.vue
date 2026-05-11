@@ -118,6 +118,7 @@ import type { LocaleProp } from '../locale/types'
 import MlFileReader from './common/MlFileReader.vue'
 import MlCompactHeader from './layout/MlCompactHeader.vue'
 import MlCompactToolStrip from './layout/MlCompactToolStrip.vue'
+import MlDrawingLoadingOverlay from './layout/MlDrawingLoadingOverlay.vue'
 
 const MlDialogManager = defineAsyncComponent(
   () => import('./common/MlDialogManager.vue')
@@ -201,7 +202,7 @@ const props = withDefaults(defineProps<Props>(), {
   localFile: undefined,
   background: undefined,
   baseUrl: undefined,
-  useMainThreadDraw: true,
+  useMainThreadDraw: false,
   theme: 'dark',
   uiMode: 'full',
   mode: AcEdOpenMode.Write
@@ -230,7 +231,8 @@ const viewerThemeClass = computed(() =>
 )
 
 const features = useSettings()
-const { beginDocumentOpening, endDocumentOpening } = useDocumentOpening()
+const { beginDocumentOpening, endDocumentOpening, isDocumentOpening } =
+  useDocumentOpening()
 const docOpenMode = useDocOpenMode()
 const pendingOpenMode = ref<AcEdOpenMode>()
 const effectiveOpenMode = computed(
@@ -242,6 +244,10 @@ const isWriteMode = computed(
 const headerHeightPx = ref(0)
 const isCompactUi = computed(() => props.uiMode === 'compact')
 const shouldMountFullUi = computed(() => !isCompactUi.value)
+const isDrawingLoading = ref(Boolean(props.url || props.localFile))
+const isViewerLoading = computed(
+  () => isDrawingLoading.value || isDocumentOpening.value
+)
 const viewerLayoutStyle = computed(() => ({
   '--ml-header-height': `${headerHeightPx.value}px`,
   '--ml-status-bar-height': isCompactUi.value ? '0px' : '30px'
@@ -278,6 +284,38 @@ const endPendingOpen = () => {
   pendingOpenMode.value = undefined
 }
 
+const beginDrawingLoad = (mode: AcEdOpenMode) => {
+  isDrawingLoading.value = true
+  beginDocumentOpening()
+  beginPendingOpen(mode)
+}
+
+const endDrawingLoad = () => {
+  endDocumentOpening()
+  endPendingOpen()
+  isDrawingLoading.value = false
+}
+
+const readFileAsArrayBuffer = (file: File) => {
+  if (typeof file.arrayBuffer === 'function') {
+    return file.arrayBuffer()
+  }
+
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = event => {
+      const result = event.target?.result
+      if (result) {
+        resolve(result as ArrayBuffer)
+      } else {
+        reject(new Error('Failed to read file content'))
+      }
+    }
+    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
 /**
  * Handles file read events from the file reader component
  * Opens the file content using the document manager
@@ -302,8 +340,7 @@ const handleFileRead = async (
     minimumChunkSize: 1000,
     mode: props.mode
   }
-  beginDocumentOpening()
-  beginPendingOpen(options.mode ?? AcEdOpenMode.Read)
+  beginDrawingLoad(options.mode ?? AcEdOpenMode.Read)
   try {
     const success = await AcApDocManager.instance.openDocument(
       fileName,
@@ -315,8 +352,7 @@ const handleFileRead = async (
     }
     store.fileName = AcApDocManager.instance.curDocument.docTitle
   } finally {
-    endDocumentOpening()
-    endPendingOpen()
+    endDrawingLoad()
   }
 }
 
@@ -331,8 +367,7 @@ const openFileFromUrl = async (url: string) => {
     minimumChunkSize: 1000,
     mode: props.mode
   }
-  beginDocumentOpening()
-  beginPendingOpen(options.mode ?? AcEdOpenMode.Read)
+  beginDrawingLoad(options.mode ?? AcEdOpenMode.Read)
   try {
     await AcApDocManager.instance.openUrl(url, options)
     store.fileName = AcApDocManager.instance.curDocument.docTitle
@@ -345,8 +380,7 @@ const openFileFromUrl = async (url: string) => {
       showClose: true
     })
   } finally {
-    endDocumentOpening()
-    endPendingOpen()
+    endDrawingLoad()
   }
 }
 
@@ -361,24 +395,9 @@ const openLocalFile = async (file: File) => {
     minimumChunkSize: 1000,
     mode: props.mode
   }
-  beginDocumentOpening()
-  beginPendingOpen(options.mode ?? AcEdOpenMode.Read)
+  beginDrawingLoad(options.mode ?? AcEdOpenMode.Read)
   try {
-    const reader = new FileReader()
-    reader.readAsArrayBuffer(file)
-
-    // Wait for file reading to complete
-    const fileContent = await new Promise<ArrayBuffer>((resolve, reject) => {
-      reader.onload = event => {
-        const result = event.target?.result
-        if (result) {
-          resolve(result as ArrayBuffer)
-        } else {
-          reject(new Error('Failed to read file content'))
-        }
-      }
-      reader.onerror = () => reject(new Error('Failed to read file'))
-    })
+    const fileContent = await readFileAsArrayBuffer(file)
 
     // Open the file using the document manager
     const success = await AcApDocManager.instance.openDocument(
@@ -398,8 +417,7 @@ const openLocalFile = async (file: File) => {
       showClose: true
     })
   } finally {
-    endDocumentOpening()
-    endPendingOpen()
+    endDrawingLoad()
   }
 }
 
@@ -446,8 +464,7 @@ watch(
 // Component lifecycle: Initialize and load initial file if URL or localFile is provided
 onMounted(async () => {
   if (props.url || props.localFile) {
-    beginDocumentOpening()
-    beginPendingOpen(props.mode)
+    beginDrawingLoad(props.mode)
   }
 
   // Initialize the CAD viewer with the internal canvas
@@ -500,7 +517,13 @@ onUnmounted(() => {
 })
 
 watch(
-  [editorRef, isWriteMode, isCompactUi, () => features.isShowToolbar],
+  [
+    editorRef,
+    isWriteMode,
+    isCompactUi,
+    isViewerLoading,
+    () => features.isShowToolbar
+  ],
   async () => {
     await nextTick()
     bindHeaderObserver()
@@ -610,7 +633,11 @@ const handleCompactBack = () => {
     <el-config-provider :locale="elementPlusLocale">
       <div class="ml-cad-layout">
         <!-- Header section with main menu and language selector -->
-        <header v-if="editorRef" ref="headerRef" class="ml-cad-header">
+        <header
+          v-if="editorRef && !isViewerLoading"
+          ref="headerRef"
+          class="ml-cad-header"
+        >
           <ml-compact-header v-if="isCompactUi" @back="handleCompactBack" />
           <template v-else>
             <ml-ribbon-commands
@@ -622,7 +649,7 @@ const handleCompactBack = () => {
         </header>
 
         <!-- Main content area with CAD viewing tools and controls -->
-        <main class="ml-cad-main">
+        <main :class="{ 'is-loading': isViewerLoading }" class="ml-cad-main">
           <!-- Canvas element for CAD rendering -->
           <div
             :class="viewerThemeClass"
@@ -630,13 +657,16 @@ const handleCompactBack = () => {
             class="ml-cad-container"
           ></div>
 
-          <ml-compact-tool-strip v-if="editorRef && isCompactUi" />
+          <ml-compact-tool-strip
+            v-if="editorRef && isCompactUi && !isViewerLoading"
+          />
 
           <!-- Display current filename at the top center -->
           <div
             v-if="
               editorRef &&
               shouldMountFullUi &&
+              !isViewerLoading &&
               !isWriteMode &&
               features.isShowFileName
             "
@@ -647,25 +677,32 @@ const handleCompactBack = () => {
 
           <!-- Toolbar for entity draw style -->
           <ml-entity-draw-style-toolbar
-            v-if="editorRef && shouldMountFullUi"
+            v-if="editorRef && shouldMountFullUi && !isViewerLoading"
             :editor="editor"
             class="ml-rev-tool-bar"
           />
 
           <!-- Toolbar with common CAD operations (zoom, pan, select, etc.) -->
-          <ml-tool-bars v-if="editorRef && shouldMountFullUi" />
+          <ml-tool-bars
+            v-if="editorRef && shouldMountFullUi && !isViewerLoading"
+          />
 
           <!-- Layer manager palette and entity properties palette for controlling entity visibility and properties -->
           <ml-palette-manager
-            v-if="editorRef && shouldMountFullUi"
+            v-if="editorRef && shouldMountFullUi && !isViewerLoading"
             :editor="editor"
           />
 
           <!-- Dialog manager for modal dialogs and settings -->
-          <ml-dialog-manager v-if="editorRef && shouldMountFullUi" />
+          <ml-dialog-manager
+            v-if="editorRef && shouldMountFullUi && !isViewerLoading"
+          />
         </main>
 
-        <footer v-if="editorRef && shouldMountFullUi" class="ml-cad-footer">
+        <footer
+          v-if="editorRef && shouldMountFullUi && !isViewerLoading"
+          class="ml-cad-footer"
+        >
           <ml-status-bar
             :is-dark="isDark"
             :toggle-dark="toggleDark"
@@ -679,13 +716,22 @@ const handleCompactBack = () => {
       <ml-file-reader v-if="editorRef" @file-read="handleFileRead" />
 
       <!-- Entity info panel for displaying object properties -->
-      <ml-entity-info v-if="editorRef && shouldMountFullUi" />
+      <ml-entity-info
+        v-if="editorRef && shouldMountFullUi && !isViewerLoading"
+      />
 
       <!-- Notification center -->
       <ml-notification-center
-        v-if="editorRef && shouldMountFullUi && showNotificationCenter"
+        v-if="
+          editorRef &&
+          shouldMountFullUi &&
+          !isViewerLoading &&
+          showNotificationCenter
+        "
         @close="closeNotificationCenter"
       />
+
+      <ml-drawing-loading-overlay v-if="isViewerLoading" />
     </el-config-provider>
   </div>
 </template>
@@ -700,6 +746,14 @@ const handleCompactBack = () => {
   outline: none;
   z-index: 1; /* Canvas below UI overlays inside main */
   pointer-events: auto; /* Ensure container can receive mouse events */
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ml-cad-container canvas {
+  touch-action: none;
 }
 
 /* Main CAD viewer container styling */
@@ -737,6 +791,17 @@ const handleCompactBack = () => {
   right: 0;
   bottom: var(--ml-status-bar-height);
   min-height: 0;
+}
+
+.ml-cad-main.is-loading {
+  top: 0;
+  bottom: 0;
+}
+
+.ml-cad-main.is-loading .ml-cad-container {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .ml-cad-footer {

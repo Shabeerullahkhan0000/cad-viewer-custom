@@ -23,6 +23,10 @@ export default {
     darkTheme: 'Dark Theme',
     lightTheme: 'Light Theme'
   },
+  loadingOverlay: {
+    title: 'Loading drawing',
+    subtitle: 'Preparing the canvas and geometry'
+  },
   ribbon: {
     tab: {
       home: 'Home',

@@ -78,6 +78,8 @@ export const DEFAULT_VIEW_2D_OPTIONS: AcTrView2dOptions = {
   background: 0x000000
 }
 
+const ENTITY_RENDER_SLICE_BUDGET_MS = 8
+
 /**
  * A 2D CAD viewer component that renders CAD drawings using Three.js.
  *
@@ -223,9 +225,14 @@ export class AcTrView2d extends AcEdBaseView {
     let selectionStartWcs: AcGePoint2dLike | null = null
     let selectionStartCanvas: AcGePoint2dLike | null = null
     let selectionPreviewEl: HTMLDivElement | null = null
+    let lastTouchPointerAt = 0
 
     const canHandleSelectionGesture = () => {
       return this.mode === AcEdViewMode.SELECTION && !this.editor.isActive
+    }
+
+    const shouldIgnoreMouseSelection = () => {
+      return Date.now() - lastTouchPointerAt < 700
     }
 
     const clearSelectionPreview = () => {
@@ -233,7 +240,21 @@ export class AcTrView2d extends AcEdBaseView {
       selectionPreviewEl = null
     }
 
+    this.canvas.addEventListener(
+      'pointerdown',
+      e => {
+        if (e.pointerType === 'touch') {
+          lastTouchPointerAt = Date.now()
+          clearSelectionPreview()
+          selectionStartWcs = null
+          selectionStartCanvas = null
+        }
+      },
+      { passive: true }
+    )
+
     this.canvas.addEventListener('mousedown', e => {
+      if (shouldIgnoreMouseSelection()) return
       if (e.button !== 0) return
       if (!canHandleSelectionGesture()) return
 
@@ -249,6 +270,7 @@ export class AcTrView2d extends AcEdBaseView {
     })
 
     this.canvas.addEventListener('mousemove', e => {
+      if (shouldIgnoreMouseSelection()) return
       if (!selectionStartWcs || !selectionPreviewEl || !selectionStartCanvas) {
         return
       }
@@ -280,6 +302,7 @@ export class AcTrView2d extends AcEdBaseView {
     })
 
     this.canvas.addEventListener('mouseup', e => {
+      if (shouldIgnoreMouseSelection()) return
       if (!selectionStartWcs || !selectionStartCanvas) return
 
       const endCanvas = this.viewportToCanvas({
@@ -916,6 +939,10 @@ export class AcTrView2d extends AcEdBaseView {
   private animate = () => {
     this._rafId = requestAnimationFrame(this.animate)
 
+    if (this._layoutViewManager.updateCameraControls()) {
+      this._isDirty = true
+    }
+
     this.events.renderFrame.dispatch({
       render: this._renderer,
       camera: this.internalCamera
@@ -1048,6 +1075,7 @@ export class AcTrView2d extends AcEdBaseView {
    * @returns The converted three entities
    */
   private async batchConvert(entities: AcDbEntity[]) {
+    let sliceStartedAt = this.now()
     for (let i = 0; i < entities.length; ++i) {
       const entity = entities[i]
       try {
@@ -1114,7 +1142,40 @@ export class AcTrView2d extends AcEdBaseView {
       } finally {
         this.decreaseNumOfEntitiesToProcess()
       }
+
+      if (
+        this.shouldYieldEntityRenderSlice(sliceStartedAt, i, entities.length)
+      ) {
+        await this.waitForNextRenderSlice()
+        sliceStartedAt = this.now()
+      }
     }
+  }
+
+  private shouldYieldEntityRenderSlice(
+    sliceStartedAt: number,
+    entityIndex: number,
+    entityCount: number
+  ) {
+    if (entityIndex >= entityCount - 1) return false
+    return this.now() - sliceStartedAt >= ENTITY_RENDER_SLICE_BUDGET_MS
+  }
+
+  private waitForNextRenderSlice() {
+    return new Promise<void>(resolve => {
+      if (
+        typeof window !== 'undefined' &&
+        typeof window.requestAnimationFrame === 'function'
+      ) {
+        window.requestAnimationFrame(() => resolve())
+      } else {
+        setTimeout(resolve, 0)
+      }
+    })
+  }
+
+  private now() {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now()
   }
 
   private handleGroup(group: AcTrGroup) {

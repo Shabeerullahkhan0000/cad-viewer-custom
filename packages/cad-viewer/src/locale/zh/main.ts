@@ -23,6 +23,10 @@ export default {
     darkTheme: '深色主题',
     lightTheme: '浅色主题'
   },
+  loadingOverlay: {
+    title: '正在加载图纸',
+    subtitle: '正在准备画布和几何图形'
+  },
   ribbon: {
     tab: {
       home: '常用',

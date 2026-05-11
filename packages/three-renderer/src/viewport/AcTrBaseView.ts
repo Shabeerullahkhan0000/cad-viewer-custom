@@ -191,6 +191,10 @@ export class AcTrBaseView {
     this._camera.updateProjectionMatrix()
   }
 
+  updateCameraControls(deltaTime?: number | null) {
+    return this._cameraControls.update(deltaTime)
+  }
+
   protected updateCameraFrustum(width?: number, height?: number) {
     const aspect = (width ?? this._width) / (height ?? this._height)
     this._camera.left = -aspect * this._frustum
@@ -222,10 +226,13 @@ export class AcTrBaseView {
       this._camera.internalCamera,
       this._renderer.domElement
     )
-    cameraControls.enableDamping = false
+    cameraControls.enableDamping = true
+    cameraControls.dampingFactor = 0.16
     cameraControls.autoRotate = false
     cameraControls.enableRotate = false
-    cameraControls.zoomSpeed = 5
+    cameraControls.zoomSpeed = 1.35
+    cameraControls.panSpeed = 1.05
+    cameraControls.screenSpacePanning = true
     cameraControls.zoomToCursor = true
     cameraControls.mouseButtons = {
       MIDDLE: THREE.MOUSE.PAN

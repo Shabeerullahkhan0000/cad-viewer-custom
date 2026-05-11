@@ -118,4 +118,8 @@ export class AcTrLayoutViewManager {
   render(scene: AcTrScene) {
     this.activeLayoutView?.render(scene)
   }
+
+  updateCameraControls(deltaTime?: number | null) {
+    return this.activeLayoutView?.updateCameraControls(deltaTime) ?? false
+  }
 }
