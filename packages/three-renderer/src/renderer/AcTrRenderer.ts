@@ -32,11 +32,9 @@ import { AcTrStyleManager } from '../style/AcTrStyleManager'
 import { AcTrSubEntityTraitsUtil } from '../util'
 import { AcTrCamera } from '../viewport'
 import { AcTrMTextRenderer } from './AcTrMTextRenderer'
-import { installSolidFillRendererPatch } from './AcTrSolidFillRendererPatch'
 import { installWipeoutRendererPatch } from './AcTrWipeoutRendererPatch'
 
 export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
-  readonly solidFillDrawOrder = -1
   private _styleManager: AcTrStyleManager
   private _renderer: THREE.WebGLRenderer
   private _subEntityTraits: AcGiSubEntityTraits
@@ -47,7 +45,6 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
 
   constructor(renderer: THREE.WebGLRenderer) {
     installWipeoutRendererPatch()
-    installSolidFillRendererPatch()
     this._renderer = renderer
     this._styleManager = new AcTrStyleManager()
     const size = renderer.getSize(new THREE.Vector2())
