@@ -5,6 +5,24 @@ export default {
     export: 'Export to DXF',
     exportImage: 'Export to Image'
   },
+  compactHeader: {
+    share: 'Share'
+  },
+  compactTools: {
+    measure: 'Measure',
+    distance: 'Measure Distance',
+    distanceShort: 'Distance',
+    area: 'Measure Area',
+    areaShort: 'Area',
+    angle: 'Measure Angle',
+    angleShort: 'Angle',
+    fullscreen: 'Full Screen',
+    fit: 'Fit to Screen',
+    snapsOn: 'Snaps On',
+    snapsOff: 'Snaps Off',
+    darkTheme: 'Dark Theme',
+    lightTheme: 'Light Theme'
+  },
   ribbon: {
     tab: {
       home: 'Home',

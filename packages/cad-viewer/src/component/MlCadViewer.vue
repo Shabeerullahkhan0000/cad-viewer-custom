@@ -89,35 +89,59 @@ import {
 } from '@mlightcad/cad-simple-viewer'
 import { log } from '@mlightcad/data-model'
 import { ElMessage } from 'element-plus'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { initializeCadViewer, store } from '../app'
+import { initializeCadViewer } from '../app/app'
+import { store } from '../app/store'
 import {
   ensureColorThemeSync,
   isDark,
-  provideViewerRect,
   setColorTheme,
-  toggleDark,
-  useDocOpenMode,
-  useDocumentOpening,
-  useEntityDrawStyle,
-  useLocale,
-  useNotificationCenter,
-  useSettings
-} from '../composable'
-import { LocaleProp } from '../locale'
-import { MlDialogManager, MlFileReader } from './common'
-import {
-  MlEntityDrawStyleToolbar,
-  MlEntityInfo,
-  MlMainMenu,
-  MlToolBars
-} from './layout'
-import { MlNotificationCenter } from './notification'
-import { MlPaletteManager } from './palette'
-import { MlRibbonCommands } from './ribbon'
-import { MlStatusBar } from './statusBar'
+  toggleDark
+} from '../composable/useDark'
+import { useDocOpenMode } from '../composable/useDocOpenMode'
+import { useDocumentOpening } from '../composable/useDocumentOpening'
+import { useLocale } from '../composable/useLocale'
+import { useNotificationCenter } from '../composable/useNotificationCenter'
+import { useSettings } from '../composable/useSettings'
+import { provideViewerRect } from '../composable/useViewerRect'
+import type { LocaleProp } from '../locale/types'
+import MlFileReader from './common/MlFileReader.vue'
+import MlCompactHeader from './layout/MlCompactHeader.vue'
+import MlCompactToolStrip from './layout/MlCompactToolStrip.vue'
+
+const MlDialogManager = defineAsyncComponent(
+  () => import('./common/MlDialogManager.vue')
+)
+const MlEntityDrawStyleToolbar = defineAsyncComponent(
+  () => import('./layout/MlEntityDrawStyleToolbar.vue')
+)
+const MlEntityInfo = defineAsyncComponent(
+  () => import('./layout/MlEntityInfo.vue')
+)
+const MlMainMenu = defineAsyncComponent(() => import('./layout/MlMainMenu.vue'))
+const MlToolBars = defineAsyncComponent(() => import('./layout/MlToolBars.vue'))
+const MlNotificationCenter = defineAsyncComponent(
+  () => import('./notification/MlNotificationCenter.vue')
+)
+const MlPaletteManager = defineAsyncComponent(
+  () => import('./palette/MlPaletteManager.vue')
+)
+const MlRibbonCommands = defineAsyncComponent(
+  () => import('./ribbon/MlRibbonCommands.vue')
+)
+const MlStatusBar = defineAsyncComponent(
+  () => import('./statusBar/MlStatusBar.vue')
+)
 
 const emit = defineEmits<{
   /**
@@ -129,6 +153,11 @@ const emit = defineEmits<{
    * Fired right before CAD viewer is destroyed
    */
   (e: 'destroy'): void
+
+  /**
+   * Fired when the compact UI back button is clicked.
+   */
+  (e: 'back'): void
 }>()
 
 // Define component props with their purposes
@@ -152,6 +181,12 @@ interface Props {
   /** Initial theme of the viewer */
   theme?: 'light' | 'dark'
   /**
+   * Controls how much viewer UI is mounted.
+   * - full: ribbon, toolbars, palettes, dialogs, and status bar
+   * - compact: only the lightweight drawing header and file reader
+   */
+  uiMode?: 'full' | 'compact'
+  /**
    * Access mode for opening CAD files.
    * - Read (0): Read-only access
    * - Review (4): Review access, compatible with Read
@@ -168,6 +203,7 @@ const props = withDefaults(defineProps<Props>(), {
   baseUrl: undefined,
   useMainThreadDraw: true,
   theme: 'dark',
+  uiMode: 'full',
   mode: AcEdOpenMode.Write
 })
 
@@ -204,8 +240,13 @@ const isWriteMode = computed(
   () => effectiveOpenMode.value === AcEdOpenMode.Write
 )
 const headerHeightPx = ref(0)
+const isCompactUi = computed(() => props.uiMode === 'compact')
+const shouldMountFullUi = computed(() => !isCompactUi.value)
+const viewerLayoutStyle = computed(() => ({
+  '--ml-header-height': `${headerHeightPx.value}px`,
+  '--ml-status-bar-height': isCompactUi.value ? '0px' : '30px'
+}))
 
-const { isShowToolbar } = useEntityDrawStyle(editor)
 provideViewerRect(containerRef)
 
 let headerResizeObserver: ResizeObserver | undefined
@@ -249,7 +290,14 @@ const endPendingOpen = () => {
  * @param fileName - Name of the uploaded file
  * @param fileContent - File content as string (DXF) or ArrayBuffer (DWG)
  */
-const handleFileRead = async (fileName: string, fileContent: ArrayBuffer) => {
+const handleFileRead = async (
+  fileName: string,
+  fileContent: string | ArrayBuffer
+) => {
+  const content =
+    typeof fileContent === 'string'
+      ? new TextEncoder().encode(fileContent).buffer
+      : fileContent
   const options: AcApOpenDatabaseOptions = {
     minimumChunkSize: 1000,
     mode: props.mode
@@ -259,7 +307,7 @@ const handleFileRead = async (fileName: string, fileContent: ArrayBuffer) => {
   try {
     const success = await AcApDocManager.instance.openDocument(
       fileName,
-      fileContent,
+      content,
       options
     )
     if (!success) {
@@ -404,11 +452,12 @@ onMounted(async () => {
 
   // Initialize the CAD viewer with the internal canvas
   if (containerRef.value) {
-    initializeCadViewer({
+    await initializeCadViewer({
       container: containerRef.value,
       baseUrl: props.baseUrl,
       autoResize: true,
-      useMainThreadDraw: props.useMainThreadDraw
+      useMainThreadDraw: props.useMainThreadDraw,
+      uiMode: props.uiMode
     })
     // AcApDocManager.instance is guaranteed only after viewer initialization.
     editorRef.value = AcApDocManager.instance
@@ -451,7 +500,7 @@ onUnmounted(() => {
 })
 
 watch(
-  [editorRef, isWriteMode, () => features.isShowToolbar],
+  [editorRef, isWriteMode, isCompactUi, () => features.isShowToolbar],
   async () => {
     await nextTick()
     bindHeaderObserver()
@@ -544,13 +593,17 @@ const toggleNotificationCenter = () => {
 const closeNotificationCenter = () => {
   showNotificationCenter.value = false
 }
+
+const handleCompactBack = () => {
+  emit('back')
+}
 </script>
 
 <template>
-  <!-- Main CAD viewer container with complete UI layout -->
+  <!-- Main CAD viewer container with configurable UI layout -->
   <div
     :class="viewerThemeClass"
-    :style="{ '--ml-header-height': `${headerHeightPx}px` }"
+    :style="viewerLayoutStyle"
     class="ml-cad-viewer-container"
   >
     <!-- Element Plus configuration provider for internationalization -->
@@ -558,11 +611,14 @@ const closeNotificationCenter = () => {
       <div class="ml-cad-layout">
         <!-- Header section with main menu and language selector -->
         <header v-if="editorRef" ref="headerRef" class="ml-cad-header">
-          <ml-ribbon-commands
-            v-if="isWriteMode"
-            :current-locale="effectiveLocale"
-          />
-          <ml-main-menu v-if="!isWriteMode" />
+          <ml-compact-header v-if="isCompactUi" @back="handleCompactBack" />
+          <template v-else>
+            <ml-ribbon-commands
+              v-if="isWriteMode"
+              :current-locale="effectiveLocale"
+            />
+            <ml-main-menu v-if="!isWriteMode" />
+          </template>
         </header>
 
         <!-- Main content area with CAD viewing tools and controls -->
@@ -574,13 +630,15 @@ const closeNotificationCenter = () => {
             class="ml-cad-container"
           ></div>
 
+          <ml-compact-tool-strip v-if="editorRef && isCompactUi" />
+
           <!-- Display current filename at the top center -->
           <div
             v-if="
               editorRef &&
+              shouldMountFullUi &&
               !isWriteMode &&
-              features.isShowFileName &&
-              !isShowToolbar
+              features.isShowFileName
             "
             class="ml-file-name"
           >
@@ -589,22 +647,25 @@ const closeNotificationCenter = () => {
 
           <!-- Toolbar for entity draw style -->
           <ml-entity-draw-style-toolbar
-            v-if="editorRef"
+            v-if="editorRef && shouldMountFullUi"
             :editor="editor"
             class="ml-rev-tool-bar"
           />
 
           <!-- Toolbar with common CAD operations (zoom, pan, select, etc.) -->
-          <ml-tool-bars v-if="editorRef" />
+          <ml-tool-bars v-if="editorRef && shouldMountFullUi" />
 
           <!-- Layer manager palette and entity properties palette for controlling entity visibility and properties -->
-          <ml-palette-manager v-if="editorRef" :editor="editor" />
+          <ml-palette-manager
+            v-if="editorRef && shouldMountFullUi"
+            :editor="editor"
+          />
 
           <!-- Dialog manager for modal dialogs and settings -->
-          <ml-dialog-manager v-if="editorRef" />
+          <ml-dialog-manager v-if="editorRef && shouldMountFullUi" />
         </main>
 
-        <footer v-if="editorRef" class="ml-cad-footer">
+        <footer v-if="editorRef && shouldMountFullUi" class="ml-cad-footer">
           <ml-status-bar
             :is-dark="isDark"
             :toggle-dark="toggleDark"
@@ -618,11 +679,11 @@ const closeNotificationCenter = () => {
       <ml-file-reader v-if="editorRef" @file-read="handleFileRead" />
 
       <!-- Entity info panel for displaying object properties -->
-      <ml-entity-info v-if="editorRef" />
+      <ml-entity-info v-if="editorRef && shouldMountFullUi" />
 
       <!-- Notification center -->
       <ml-notification-center
-        v-if="editorRef && showNotificationCenter"
+        v-if="editorRef && shouldMountFullUi && showNotificationCenter"
         @close="closeNotificationCenter"
       />
     </el-config-provider>

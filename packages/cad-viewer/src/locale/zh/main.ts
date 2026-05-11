@@ -5,6 +5,24 @@ export default {
     export: '导出为DXF',
     exportImage: '导出图片'
   },
+  compactHeader: {
+    share: '分享'
+  },
+  compactTools: {
+    measure: '测量',
+    distance: '测量距离',
+    distanceShort: '距离',
+    area: '测量面积',
+    areaShort: '面积',
+    angle: '测量角度',
+    angleShort: '角度',
+    fullscreen: '全屏',
+    fit: '适应屏幕',
+    snapsOn: '对象捕捉已开',
+    snapsOff: '对象捕捉已关',
+    darkTheme: '深色主题',
+    lightTheme: '浅色主题'
+  },
   ribbon: {
     tab: {
       home: '常用',

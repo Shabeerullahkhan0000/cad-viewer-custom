@@ -9,9 +9,11 @@
     <div v-else>
       <MlCadViewer
         locale="en"
+        ui-mode="compact"
         :local-file="store.selectedFile"
         :mode="selectedMode"
         @create="initialize"
+        @back="handleBackToRecent"
         base-url="https://cdn.jsdelivr.net/gh/mlightcad/cad-data@main/"
       />
     </div>
@@ -25,8 +27,8 @@ import {
   AcEdCommandStack,
   AcEdOpenMode
 } from '@mlightcad/cad-simple-viewer'
-import { MlCadViewer } from '@mlightcad/cad-viewer'
 
+import MlCadViewer from '../../cad-viewer/src/component/MlCadViewer.vue'
 import { AcApQuitCmd } from './commands'
 import FileUpload from './components/FileUpload.vue'
 import { initializeLocale } from './locale'
@@ -52,15 +54,20 @@ const initialize = () => {
 // Decide whether to show command line vertical toolbar at the right side,
 // performance stats, coordinates in status bar, etc.
 AcApSettingManager.instance.isShowCommandLine = false
-// AcApSettingManager.instance.isShowToolbar = false
-// AcApSettingManager.instance.isShowStats = false
-// AcApSettingManager.instance.isShowCoordinate = false
+AcApSettingManager.instance.isShowMainMenu = false
+AcApSettingManager.instance.isShowToolbar = false
+AcApSettingManager.instance.isShowStats = false
+AcApSettingManager.instance.isShowCoordinate = false
 
 const selectedMode = AcEdOpenMode.Write
 
 // Handle file selection from upload component
 const handleFileSelect = (file: File) => {
   store.selectedFile = file
+}
+
+const handleBackToRecent = () => {
+  store.selectedFile = null
 }
 </script>
 

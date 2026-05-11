@@ -1,10 +1,9 @@
 import 'element-plus/dist/index.css'
-import 'element-plus/dist/index.css'
 
-import { i18n } from '@mlightcad/cad-viewer'
 import ElementPlus from 'element-plus'
 import { createApp } from 'vue'
 
+import { i18n } from '../../cad-viewer/src/locale/i18n'
 import App from './App.vue'
 
 const initApp = () => {
