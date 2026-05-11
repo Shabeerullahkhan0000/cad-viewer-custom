@@ -240,18 +240,31 @@ export class AcTrView2d extends AcEdBaseView {
       selectionPreviewEl = null
     }
 
-    this.canvas.addEventListener(
-      'pointerdown',
-      e => {
-        if (e.pointerType === 'touch') {
-          lastTouchPointerAt = Date.now()
-          clearSelectionPreview()
-          selectionStartWcs = null
-          selectionStartCanvas = null
-        }
-      },
-      { passive: true }
-    )
+    const suppressSelectionAfterTouch = () => {
+      lastTouchPointerAt = Date.now()
+      clearSelectionPreview()
+      selectionStartWcs = null
+      selectionStartCanvas = null
+    }
+
+    const handleTouchPointer = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        suppressSelectionAfterTouch()
+      }
+    }
+
+    this.canvas.addEventListener('pointerdown', handleTouchPointer, {
+      passive: true
+    })
+    this.canvas.addEventListener('pointermove', handleTouchPointer, {
+      passive: true
+    })
+    this.canvas.addEventListener('pointerup', handleTouchPointer, {
+      passive: true
+    })
+    this.canvas.addEventListener('pointercancel', handleTouchPointer, {
+      passive: true
+    })
 
     this.canvas.addEventListener('mousedown', e => {
       if (shouldIgnoreMouseSelection()) return
