@@ -32,7 +32,6 @@ import { AcTrStyleManager } from '../style/AcTrStyleManager'
 import { AcTrSubEntityTraitsUtil } from '../util'
 import { AcTrCamera } from '../viewport'
 import { AcTrMTextRenderer } from './AcTrMTextRenderer'
-import { installWipeoutRendererPatch } from './AcTrWipeoutRendererPatch'
 
 export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
   private _styleManager: AcTrStyleManager
@@ -44,7 +43,6 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
   }
 
   constructor(renderer: THREE.WebGLRenderer) {
-    installWipeoutRendererPatch()
     this._renderer = renderer
     this._styleManager = new AcTrStyleManager()
     const size = renderer.getSize(new THREE.Vector2())
@@ -302,23 +300,6 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
   }
 
   /**
-   * Draws a WIPEOUT boundary without emitting an opaque fill.
-   *
-   * Full CAD wipeout masking needs ordered stencil/compositing support. Until
-   * that is available, rendering the boundary preserves selectability and
-   * diagnostics without hiding unrelated linework behind a white rectangle.
-   */
-  wipeout(points: AcGePoint3dLike[]) {
-    const outlinePoints = this.closeBoundary(points)
-    const entity = this.linePoints(outlinePoints)
-    entity.traverse(object => {
-      object.userData.cadEntityType = 'WIPEOUT'
-      object.userData.renderMode = 'outline'
-    })
-    return entity
-  }
-
-  /**
    * @inheritdoc
    */
   lineSegments(array: Float32Array, itemSize: number, indices: Uint16Array) {
@@ -368,22 +349,6 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
 
   private linePoints(points: AcGePoint3dLike[]) {
     return new AcTrLine(points, this._subEntityTraits, this._styleManager)
-  }
-
-  private closeBoundary(points: AcGePoint3dLike[]) {
-    if (points.length < 2) return points
-
-    const first = points[0]
-    const last = points[points.length - 1]
-    if (
-      first.x === last.x &&
-      first.y === last.y &&
-      (first.z ?? 0) === (last.z ?? 0)
-    ) {
-      return points
-    }
-
-    return [...points, first]
   }
 
   /**
