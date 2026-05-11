@@ -1,5 +1,9 @@
 <template>
-  <div class="ml-compact-tools" aria-label="Drawing tools">
+  <div
+    ref="compactToolsRef"
+    class="ml-compact-tools"
+    aria-label="Drawing tools"
+  >
     <div class="ml-compact-tools__measure-wrap">
       <button
         :aria-expanded="isMeasurementMenuOpen"
@@ -18,19 +22,25 @@
         v-if="isMeasurementMenuOpen"
         class="ml-compact-tools__measure-menu"
         role="menu"
+        @pointerdown.stop
       >
         <button
           v-for="item in measurementItems"
           :key="item.command"
           :aria-label="item.label"
+          :class="`is-${item.variant}`"
           :title="item.label"
           class="ml-compact-tools__measure-button"
           role="menuitem"
           type="button"
           @click="runCommand(item.command)"
         >
-          <component :is="item.icon" class="ml-compact-tools__icon" />
-          <span>{{ item.shortLabel }}</span>
+          <span class="ml-compact-tools__measure-icon-shell">
+            <component :is="item.icon" class="ml-compact-tools__icon" />
+          </span>
+          <span class="ml-compact-tools__measure-label">
+            {{ item.shortLabel }}
+          </span>
         </button>
       </div>
     </div>
@@ -112,6 +122,7 @@ const { isDocumentOpening } = useDocumentOpening()
 const isMeasurementMenuOpen = ref(false)
 const isFullscreen = ref(false)
 const lastSnapModes = ref(features.osnapModes)
+const compactToolsRef = ref<HTMLElement | null>(null)
 
 const defaultSnapModes = acdbOsnapModesToMask([
   AcDbOsnapMode.EndPoint,
@@ -126,19 +137,22 @@ const measurementItems = computed(() => [
     command: 'measuredistance',
     icon: MeasureDistanceIcon,
     label: t('main.compactTools.distance'),
-    shortLabel: t('main.compactTools.distanceShort')
+    shortLabel: t('main.compactTools.distanceShort'),
+    variant: 'distance'
   },
   {
     command: 'measurearea',
     icon: MeasureAreaIcon,
     label: t('main.compactTools.area'),
-    shortLabel: t('main.compactTools.areaShort')
+    shortLabel: t('main.compactTools.areaShort'),
+    variant: 'area'
   },
   {
     command: 'measureangle',
     icon: MeasureAngleIcon,
     label: t('main.compactTools.angle'),
-    shortLabel: t('main.compactTools.angleShort')
+    shortLabel: t('main.compactTools.angleShort'),
+    variant: 'angle'
   }
 ])
 
@@ -200,15 +214,24 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 }
 
+const handleDocumentPointerDown = (event: PointerEvent) => {
+  if (!isMeasurementMenuOpen.value) return
+  const target = event.target
+  if (target instanceof Node && compactToolsRef.value?.contains(target)) return
+  isMeasurementMenuOpen.value = false
+}
+
 onMounted(() => {
   document.addEventListener('fullscreenchange', updateFullscreenState)
   document.addEventListener('keydown', handleKeydown)
+  document.addEventListener('pointerdown', handleDocumentPointerDown, true)
   updateFullscreenState()
 })
 
 onUnmounted(() => {
   document.removeEventListener('fullscreenchange', updateFullscreenState)
   document.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('pointerdown', handleDocumentPointerDown, true)
 })
 </script>
 
@@ -277,27 +300,146 @@ onUnmounted(() => {
   right: calc(100% + 10px);
   display: grid;
   grid-template-columns: repeat(3, minmax(74px, 1fr));
-  gap: 8px;
-  width: min(304px, calc(100vw - 110px));
+  gap: 10px;
+  width: min(330px, calc(100vw - 110px));
   box-sizing: border-box;
-  padding: 8px;
-  background: color-mix(in srgb, var(--el-bg-color) 94%, transparent);
-  border: 1px solid var(--el-border-color-lighter);
+  padding: 10px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--el-bg-color) 98%, transparent),
+      color-mix(in srgb, var(--el-fill-color-light) 92%, transparent)
+    );
+  border: 1px solid
+    color-mix(in srgb, var(--el-border-color-light) 76%, transparent);
   border-radius: 8px;
-  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.16);
-  backdrop-filter: blur(12px);
+  box-shadow:
+    0 18px 44px rgba(15, 23, 42, 0.2),
+    inset 0 1px 0 color-mix(in srgb, #fff 48%, transparent);
+  backdrop-filter: blur(18px);
+  animation: ml-measure-menu-in 140ms ease-out;
 }
 
 .ml-compact-tools__measure-button {
+  --measure-accent: var(--el-color-primary);
+  position: relative;
+  flex-direction: column;
   gap: 7px;
   min-width: 0;
-  padding: 0 12px;
+  height: 68px;
+  padding: 9px 8px 8px;
+  overflow: hidden;
+  color: var(--el-text-color-primary);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--el-bg-color) 99%, transparent),
+      color-mix(in srgb, var(--measure-accent) 8%, var(--el-bg-color))
+    );
+  border-color: color-mix(
+    in srgb,
+    var(--measure-accent) 28%,
+    var(--el-border-color)
+  );
   white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
 }
 
-.ml-compact-tools__measure-button span {
+.ml-compact-tools__measure-button::before {
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 3px;
+  content: '';
+  background: var(--measure-accent);
+  border-radius: 0 0 8px 8px;
+  opacity: 0.9;
+}
+
+.ml-compact-tools__measure-button.is-distance {
+  --measure-accent: #2563eb;
+}
+
+.ml-compact-tools__measure-button.is-area {
+  --measure-accent: #059669;
+}
+
+.ml-compact-tools__measure-button.is-angle {
+  --measure-accent: #d97706;
+}
+
+.ml-compact-tools__measure-button:hover,
+.ml-compact-tools__measure-button:focus-visible {
+  color: color-mix(
+    in srgb,
+    var(--measure-accent) 86%,
+    var(--el-text-color-primary)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--measure-accent) 66%,
+    var(--el-border-color)
+  );
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--measure-accent) 10%, var(--el-bg-color)),
+      color-mix(in srgb, var(--measure-accent) 16%, var(--el-bg-color))
+    );
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.14),
+    0 0 0 3px color-mix(in srgb, var(--measure-accent) 16%, transparent);
+  transform: translateY(-1px);
+}
+
+.ml-compact-tools__measure-icon-shell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--measure-accent);
+  background: color-mix(
+    in srgb,
+    var(--measure-accent) 12%,
+    var(--el-bg-color)
+  );
+  border: 1px solid color-mix(in srgb, var(--measure-accent) 22%, transparent);
+  border-radius: 8px;
+}
+
+.ml-compact-tools__measure-icon-shell .ml-compact-tools__icon {
+  width: 19px;
+  height: 19px;
+}
+
+.ml-compact-tools__measure-label {
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+}
+
+@keyframes ml-measure-menu-in {
+  from {
+    opacity: 0;
+    transform: translate3d(6px, 0, 0) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
 
 @media (max-width: 900px), (max-height: 560px), (pointer: coarse) {
@@ -313,6 +455,10 @@ onUnmounted(() => {
     transform: none;
   }
 
+  .ml-compact-tools__measure-wrap {
+    display: contents;
+  }
+
   .ml-compact-tools__button {
     width: 100%;
     min-width: 0;
@@ -322,19 +468,51 @@ onUnmounted(() => {
   .ml-compact-tools__measure-menu {
     top: auto;
     right: auto;
-    bottom: calc(100% + 10px);
+    bottom: calc(100% + 12px);
     left: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
     box-sizing: border-box;
+    gap: 9px;
+    padding: 10px;
+    box-shadow:
+      0 16px 40px rgba(15, 23, 42, 0.22),
+      inset 0 1px 0 color-mix(in srgb, #fff 48%, transparent);
+    animation-name: ml-measure-menu-up;
   }
 
   .ml-compact-tools__measure-button {
     min-width: 0;
     width: 100%;
-    height: 48px;
-    padding: 0 8px;
+    height: 76px;
+    padding: 11px 6px 9px;
+  }
+
+  .ml-compact-tools__measure-icon-shell {
+    width: 34px;
+    height: 34px;
+  }
+
+  .ml-compact-tools__measure-icon-shell .ml-compact-tools__icon {
+    width: 21px;
+    height: 21px;
+  }
+
+  .ml-compact-tools__measure-label {
+    font-size: 12px;
+  }
+
+  @keyframes ml-measure-menu-up {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 8px, 0) scale(0.98);
+    }
+
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
   }
 }
 
@@ -348,18 +526,39 @@ onUnmounted(() => {
     height: 46px;
   }
 
-  .ml-compact-tools__measure-button span {
+  .ml-compact-tools__measure-label {
     font-size: 11px;
   }
 }
 
 @media (max-width: 340px) {
   .ml-compact-tools__measure-menu {
-    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 8px;
   }
 
   .ml-compact-tools__measure-button {
-    justify-content: flex-start;
+    height: 68px;
+  }
+
+  .ml-compact-tools__measure-icon-shell {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ml-compact-tools__measure-menu {
+    animation: none;
+  }
+
+  .ml-compact-tools__measure-button {
+    transition: none;
+  }
+
+  .ml-compact-tools__measure-button:hover,
+  .ml-compact-tools__measure-button:focus-visible {
+    transform: none;
   }
 }
 </style>
