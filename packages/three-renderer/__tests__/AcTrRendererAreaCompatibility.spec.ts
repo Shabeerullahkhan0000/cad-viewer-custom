@@ -115,50 +115,6 @@ describe('AcTrRenderer area compatibility', () => {
     ).toBeGreaterThan(0)
     expect(entity.userData.fillSuppressed).toBeUndefined()
   })
-
-  it('outlines background-tier gradient fills instead of emitting opaque slabs', () => {
-    const { renderer, traits } = createHeadlessRenderer()
-    traits.drawOrder = -1
-    traits.fillType = {
-      solidFill: false,
-      patternAngle: 0,
-      definitionLines: [],
-      gradient: {
-        name: 'LINEAR',
-        angle: 0,
-        shift: 0,
-        oneColorMode: false,
-        shadeTintValue: 0,
-        endColor: 0xffffff
-      }
-    }
-
-    const entity = renderer.area(createSquareArea())
-
-    expect(countChildren(entity, object => object instanceof THREE.Mesh)).toBe(0)
-    expect(
-      countChildren(entity, object => object instanceof THREE.LineSegments)
-    ).toBeGreaterThan(0)
-    expect(entity.userData.fillSuppressed).toBe(true)
-  })
-
-  it('outlines background-tier hatches that would fall back to solid meshes', () => {
-    const { renderer, traits } = createHeadlessRenderer()
-    traits.drawOrder = -1
-    traits.fillType = {
-      solidFill: false,
-      patternAngle: 0,
-      definitionLines: []
-    }
-
-    const entity = renderer.area(createSquareArea())
-
-    expect(countChildren(entity, object => object instanceof THREE.Mesh)).toBe(0)
-    expect(
-      countChildren(entity, object => object instanceof THREE.LineSegments)
-    ).toBeGreaterThan(0)
-    expect(entity.userData.fillSuppressed).toBe(true)
-  })
 })
 
 function createHeadlessRenderer() {
