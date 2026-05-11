@@ -338,10 +338,6 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
    * @inheritdoc
    */
   area(area: AcGeArea2d) {
-    if (this.shouldOutlineSolidFillArea()) {
-      return this.outlineArea(area)
-    }
-
     return new AcTrPolygon(area, this._subEntityTraits, this._styleManager)
   }
 
@@ -391,39 +387,6 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
     }
 
     return [...points, first]
-  }
-
-  private outlineArea(area: AcGeArea2d) {
-    const boundaries = area.getPoints(100)
-    const entities = boundaries
-      .filter(points => points.length >= 2)
-      .map(points => {
-        const outlinePoints = points.map(point => ({
-          x: point.x,
-          y: point.y,
-          z: 0
-        }))
-        return this.linePoints(this.closeBoundary(outlinePoints))
-      })
-
-    const entity = entities.length === 1 ? entities[0] : this.group(entities)
-    entity.traverse(object => {
-      object.userData.renderMode = 'outline'
-      object.userData.fillSuppressed = true
-    })
-    return entity
-  }
-
-  private shouldOutlineSolidFillArea() {
-    const traits = this._subEntityTraits
-    const fillType = traits.fillType
-    const isBackgroundTier = (traits.drawOrder ?? 0) < 0
-    const isSolidFill =
-      fillType.solidFill &&
-      !fillType.gradient &&
-      (!fillType.definitionLines || fillType.definitionLines.length === 0)
-
-    return isBackgroundTier && isSolidFill
   }
 
   /**
