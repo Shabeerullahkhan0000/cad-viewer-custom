@@ -31,6 +31,7 @@ const getIsMobileInput = () => {
 }
 
 const SYNTHETIC_MOUSE_SUPPRESSION_MS = 700
+const MOBILE_RESIZE_DEBOUNCE_MS = 200
 
 /**
  * Interface to define arguments of mouse event events.
@@ -250,6 +251,14 @@ export abstract class AcEdBaseView {
     canvas: AcGePoint2d
     world: AcGePoint2d
   } | null = null
+  /** ResizeObserver owned by this view and disconnected in dispose(). */
+  private _resizeObserver?: ResizeObserver
+  /** Debounced resize callback shared by ResizeObserver and orientation changes. */
+  private _debouncedWindowResize?: (() => void) & {
+    cancel?: () => void
+  }
+  /** Screen orientation object currently observed on mobile, if supported. */
+  private _observedScreenOrientation?: ScreenOrientation
 
   /** Events fired by the view for various interactions */
   public readonly events = {
@@ -306,12 +315,19 @@ export abstract class AcEdBaseView {
       }
     })
 
-    const debouncedWindowResize = debounce(() => this.onWindowResize(), 0, {
-      leading: false,
-      trailing: true
+    this._debouncedWindowResize = debounce(
+      () => this.onWindowResize(),
+      this._isMobileInput ? MOBILE_RESIZE_DEBOUNCE_MS : 0,
+      {
+        leading: false,
+        trailing: true
+      }
+    )
+    this._resizeObserver = new ResizeObserver(() => {
+      this._debouncedWindowResize?.()
     })
-    const resizeObserver = new ResizeObserver(debouncedWindowResize)
-    resizeObserver.observe(this._canvas.parentElement as Element)
+    this._resizeObserver.observe(this._canvas.parentElement ?? this._container)
+    this.registerMobileOrientationResizeHandler()
 
     this._selectionBoxSize = 4
 
@@ -940,6 +956,25 @@ export abstract class AcEdBaseView {
     return this._selectionSet
   }
 
+  dispose() {
+    this._resizeObserver?.disconnect()
+    this._resizeObserver = undefined
+    this._debouncedWindowResize?.cancel?.()
+    this._debouncedWindowResize = undefined
+    if (this._observedScreenOrientation) {
+      this._observedScreenOrientation.removeEventListener(
+        'change',
+        this.onMobileOrientationChange
+      )
+      this._observedScreenOrientation = undefined
+    }
+    if (this._mouseMoveRafId != null) {
+      cancelAnimationFrame(this._mouseMoveRafId)
+      this._mouseMoveRafId = null
+    }
+    this._hoverController.dispose()
+  }
+
   protected onWindowResize() {
     if (this._calculateSizeCallback) {
       const { width, height } = this._calculateSizeCallback()
@@ -960,6 +995,22 @@ export abstract class AcEdBaseView {
    */
   protected clearHover() {
     this._hoverController.clear()
+  }
+
+  private registerMobileOrientationResizeHandler() {
+    if (!this._isMobileInput) return
+    if (typeof screen === 'undefined') return
+    if (!screen.orientation) return
+
+    this._observedScreenOrientation = screen.orientation
+    this._observedScreenOrientation.addEventListener(
+      'change',
+      this.onMobileOrientationChange
+    )
+  }
+
+  private onMobileOrientationChange = () => {
+    this._debouncedWindowResize?.()
   }
 
   /**

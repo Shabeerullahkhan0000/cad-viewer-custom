@@ -81,6 +81,37 @@ export const DEFAULT_VIEW_2D_OPTIONS: AcTrView2dOptions = {
 const ENTITY_RENDER_SLICE_BUDGET_MS = 8
 const MOBILE_FIRST_PROGRESSIVE_RENDER_AT = 20
 const MOBILE_PROGRESSIVE_RENDER_INTERVAL = 100
+const IOS_LOW_POWER_FRAME_DELTA_MS = 40
+const IOS_LOW_POWER_FRAME_COUNT = 8
+
+type AcTrRenderQuality = 'high' | 'low'
+
+const getIsDevRuntime = () => {
+  const meta = import.meta as ImportMeta & {
+    env?: {
+      DEV?: boolean
+    }
+  }
+
+  if (typeof meta.env?.DEV === 'boolean') {
+    return meta.env.DEV
+  }
+
+  if (typeof window === 'undefined') return false
+  return (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1'
+  )
+}
+
+const getIsIOS = () => {
+  if (typeof navigator === 'undefined') return false
+
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+}
 
 const waitForMobileCpuTask = () =>
   new Promise<void>(resolve => {
@@ -156,6 +187,20 @@ export class AcTrView2d extends AcEdBaseView {
   private _css2dRenderer: CSS2DRenderer
   /** Invalidates pending mobile deferred-index flushes when a new load starts. */
   private _mobileSpatialIndexFlushToken = 0
+  /** Runtime dev flag used to keep Stats out of mobile/production frames. */
+  private readonly _isDevRuntime = getIsDevRuntime()
+  /** iOS-only low-power detector state. */
+  private readonly _isIOS = getIsIOS()
+  /** Render-quality mode adjusted when iOS Low Power Mode is inferred. */
+  private _renderQuality: AcTrRenderQuality = 'high'
+  /** Previous rAF timestamp for iOS Low Power Mode inference. */
+  private _lastAnimationFrameAt = 0
+  /** Consecutive slow frames used to infer iOS 30fps throttling. */
+  private _slowAnimationFrameCount = 0
+  /** User-facing recovery overlay shown after WebGL context loss. */
+  private _contextLostOverlay?: HTMLButtonElement
+  /** True after mobile memory/platform stability listeners are attached. */
+  private _hasMobilePlatformStabilityHandlers = false
 
   /**
    * Creates a new 2D CAD viewer instance.
@@ -185,8 +230,11 @@ export class AcTrView2d extends AcEdBaseView {
       this.setCalculateSizeCallback(options.calculateSizeCallback)
     }
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    renderer.setSize(this.width, this.height)
+    const initialRenderSize = this.getResponsiveRenderSize()
+    this.width = initialRenderSize.width
+    this.height = initialRenderSize.height
+    renderer.setPixelRatio(this.getTargetPixelRatio())
+    renderer.setSize(initialRenderSize.width, initialRenderSize.height)
 
     this._renderer = new AcTrRenderer(renderer)
     const fontMapping = AcApSettingManager.instance.fontMapping
@@ -199,9 +247,16 @@ export class AcTrView2d extends AcEdBaseView {
     })
 
     this._scene = this.createScene()
+    if (this.isMobileInput) {
+      this._scene.setMobileRenderOptimizationsEnabled(true)
+      this.registerMobilePlatformStabilityHandlers()
+    }
     // Initialize background color through setter to keep renderer/cursor/foreground in sync.
     this.backgroundColor = mergedOptions.background || 0x000000
     this._stats = this.createStats(AcApSettingManager.instance.isShowStats)
+    if (this.isMobileInput) {
+      this.registerWebGLContextResilience()
+    }
 
     // Two sysvars can drive the canvas background:
     //
@@ -893,10 +948,18 @@ export class AcTrView2d extends AcEdBaseView {
    */
   clear() {
     this._mobileSpatialIndexFlushToken++
+    this.releaseMobileHighlightResources()
     this._scene.clear()
     this._isDirty = true
     this._missedImages.clear()
     this._renderer.dispose()
+  }
+
+  dispose() {
+    this.unregisterMobilePlatformStabilityHandlers()
+    this.unregisterWebGLContextResilience()
+    this.hideContextLostOverlay()
+    super.dispose()
   }
 
   /**
@@ -982,20 +1045,221 @@ export class AcTrView2d extends AcEdBaseView {
     statsDom.style.inset = 'unset'
     statsDom.style.bottom = '30px'
     statsDom.style.right = '0px'
+    if (this.isMobileInput || !this._isDevRuntime) {
+      statsDom.style.display = 'none'
+      return stats
+    }
+
     this.toggleStatsVisibility(stats, show)
     return stats
   }
 
   protected onWindowResize() {
     super.onWindowResize()
-    this._renderer.setSize(this.width, this.height)
-    this._css2dRenderer.setSize(this.width, this.height)
-    this._layoutViewManager.resize(this.width, this.height)
+    const size = this.getResponsiveRenderSize()
+    this.width = size.width
+    this.height = size.height
+    this.applyRendererSize(size.width, size.height)
     this._isDirty = true
   }
 
-  private animate = () => {
+  private getResponsiveRenderSize() {
+    if (this.isMobileInput) {
+      const rect = this.container.getBoundingClientRect()
+      const width = Math.round(this.container.clientWidth || rect.width)
+      const height = Math.round(this.container.clientHeight || rect.height)
+      if (width > 0 && height > 0) {
+        return { width, height }
+      }
+    }
+
+    return {
+      width: Math.max(1, Math.round(this.width)),
+      height: Math.max(1, Math.round(this.height))
+    }
+  }
+
+  private applyRendererSize(width: number, height: number) {
+    if (this.isMobileInput) {
+      this._renderer.setPixelRatio(this.getTargetPixelRatio())
+    }
+    this._renderer.setSize(width, height)
+    this._css2dRenderer?.setSize(width, height)
+    this._layoutViewManager?.resize(width, height)
+
+    if (!this.isMobileInput) return
+    const camera = this.internalCamera as
+      | (THREE.Camera & {
+          aspect?: number
+          updateProjectionMatrix?: () => void
+        })
+      | undefined
+    if (camera && 'aspect' in camera && height > 0) {
+      camera.aspect = width / height
+    }
+    if (typeof camera?.updateProjectionMatrix === 'function') {
+      camera.updateProjectionMatrix()
+    }
+  }
+
+  private getTargetPixelRatio() {
+    if (this.isMobileInput && this._renderQuality === 'low') return 1
+
+    const pixelRatio =
+      typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+    return Math.min(pixelRatio, 2)
+  }
+
+  private detectIOSLowPowerMode(timestamp: number) {
+    if (!this.isMobileInput || !this._isIOS || this._renderQuality === 'low') {
+      this._lastAnimationFrameAt = timestamp
+      return
+    }
+
+    if (this._lastAnimationFrameAt === 0) {
+      this._lastAnimationFrameAt = timestamp
+      return
+    }
+
+    const delta = timestamp - this._lastAnimationFrameAt
+    this._lastAnimationFrameAt = timestamp
+    if (delta > IOS_LOW_POWER_FRAME_DELTA_MS) {
+      this._slowAnimationFrameCount++
+    } else {
+      this._slowAnimationFrameCount = Math.max(
+        0,
+        this._slowAnimationFrameCount - 1
+      )
+    }
+
+    if (this._slowAnimationFrameCount < IOS_LOW_POWER_FRAME_COUNT) return
+
+    this._renderQuality = 'low'
+    this._slowAnimationFrameCount = 0
+    this.applyRendererSize(this.width, this.height)
+    this._isDirty = true
+  }
+
+  private registerWebGLContextResilience() {
+    this.canvas.addEventListener('webglcontextlost', this.onWebGLContextLost, {
+      passive: false
+    })
+    this.canvas.addEventListener(
+      'webglcontextrestored',
+      this.onWebGLContextRestored
+    )
+  }
+
+  private unregisterWebGLContextResilience() {
+    this.canvas.removeEventListener(
+      'webglcontextlost',
+      this.onWebGLContextLost
+    )
+    this.canvas.removeEventListener(
+      'webglcontextrestored',
+      this.onWebGLContextRestored
+    )
+  }
+
+  private onWebGLContextLost = (event: Event) => {
+    event.preventDefault()
+    this.showContextLostOverlay()
+  }
+
+  private onWebGLContextRestored = () => {
+    this.hideContextLostOverlay()
+    try {
+      this._renderer.resetState()
+      this.applyRendererSize(this.width, this.height)
+      AcApDocManager.instance.regen()
+    } catch (error) {
+      log.error('[AcTrView2d] Failed to restore WebGL context:', error)
+      this.showContextLostOverlay()
+    }
+  }
+
+  private showContextLostOverlay() {
+    if (this._contextLostOverlay) return
+
+    const overlay = document.createElement('button')
+    overlay.type = 'button'
+    overlay.textContent = 'Tap to reload'
+    overlay.setAttribute('aria-label', 'Tap to reload the CAD viewer')
+    Object.assign(overlay.style, {
+      position: 'absolute',
+      inset: '0',
+      zIndex: '100000',
+      border: '0',
+      background: 'rgba(9, 14, 24, 0.82)',
+      color: '#ffffff',
+      font: '600 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+      display: 'grid',
+      placeItems: 'center',
+      cursor: 'pointer'
+    })
+    overlay.addEventListener('click', () => {
+      window.location.reload()
+    })
+    if (window.getComputedStyle(this.container).position === 'static') {
+      this.container.style.position = 'relative'
+    }
+    this.container.appendChild(overlay)
+    this._contextLostOverlay = overlay
+  }
+
+  private hideContextLostOverlay() {
+    this._contextLostOverlay?.remove()
+    this._contextLostOverlay = undefined
+  }
+
+  private registerMobilePlatformStabilityHandlers() {
+    if (this._hasMobilePlatformStabilityHandlers) return
+
+    this.canvas.addEventListener(
+      'pointercancel',
+      this.releaseMobileHighlightResources
+    )
+    document.addEventListener(
+      'visibilitychange',
+      this.onDocumentVisibilityChange
+    )
+    window.addEventListener('blur', this.releaseMobileHighlightResources)
+    this._hasMobilePlatformStabilityHandlers = true
+  }
+
+  private unregisterMobilePlatformStabilityHandlers() {
+    if (!this._hasMobilePlatformStabilityHandlers) return
+
+    this.canvas.removeEventListener(
+      'pointercancel',
+      this.releaseMobileHighlightResources
+    )
+    document.removeEventListener(
+      'visibilitychange',
+      this.onDocumentVisibilityChange
+    )
+    window.removeEventListener('blur', this.releaseMobileHighlightResources)
+    this._hasMobilePlatformStabilityHandlers = false
+  }
+
+  private onDocumentVisibilityChange = () => {
+    if (document.visibilityState === 'hidden') {
+      this.releaseMobileHighlightResources()
+    }
+  }
+
+  private releaseMobileHighlightResources = () => {
+    if (!this.isMobileInput) return
+
+    this.clearHover()
+    this.selectionSet.clear()
+    this._scene.clearHighlights()
+    this._isDirty = true
+  }
+
+  private animate = (timestamp: number = this.now()) => {
     this._rafId = requestAnimationFrame(this.animate)
+    this.detectIOSLowPowerMode(timestamp)
 
     if (this._layoutViewManager.updateCameraControls()) {
       this._isDirty = true
@@ -1027,7 +1291,8 @@ export class AcTrView2d extends AcEdBaseView {
         this._renderer,
         layoutBtrId,
         this.width,
-        this.height
+        this.height,
+        this.isMobileInput
       )
       layoutView.events.viewChanged.addEventListener(() => {
         this._isDirty = true
@@ -1091,6 +1356,11 @@ export class AcTrView2d extends AcEdBaseView {
    * Default value is false.
    */
   private toggleStatsVisibility(stats: Stats, show?: boolean) {
+    if (this.isMobileInput || !this._isDevRuntime) {
+      stats.dom.style.display = 'none'
+      return
+    }
+
     if (show) {
       stats.dom.style.display = 'block' // Show the stats
     } else {
@@ -1233,12 +1503,30 @@ export class AcTrView2d extends AcEdBaseView {
   }
 
   private renderCurrentFrame() {
-    this._layoutViewManager.render(this._scene)
-    if (this.internalCamera) {
-      this._css2dRenderer.render(this._scene.internalScene, this.internalCamera)
+    this._renderer.beginFrame()
+    try {
+      this._layoutViewManager.render(this._scene)
+      if (this.internalCamera) {
+        this._css2dRenderer.render(
+          this._scene.internalScene,
+          this.internalCamera
+        )
+      }
+    } finally {
+      this._renderer.endFrame()
     }
-    this._stats?.update()
+    this.updateStats()
     this._isDirty = false
+  }
+
+  private updateStats() {
+    if (this.isMobileInput || !this._isDevRuntime) {
+      if (this._stats) this._stats.dom.style.display = 'none'
+      return
+    }
+
+    if (this._stats?.dom.style.display === 'none') return
+    this._stats?.update()
   }
 
   private shouldYieldEntityRenderSlice(

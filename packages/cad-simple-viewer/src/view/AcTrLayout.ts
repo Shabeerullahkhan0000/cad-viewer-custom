@@ -80,6 +80,8 @@ export class AcTrLayout {
   private _spatialIndex: AcTrHierarchicalSpatialIndex
   /** Defers expensive R-tree insertion during mobile document load. */
   private _isSpatialIndexBuildDeferred: boolean
+  /** Enables mobile-only render culling on per-layer batch groups. */
+  private _isMobileRenderOptimized: boolean
   /** Spatial items collected while index insertion is deferred. */
   private _deferredSpatialIndexEntries: Map<
     AcDbObjectId,
@@ -100,6 +102,7 @@ export class AcTrLayout {
     this._group = new THREE.Group()
     this._spatialIndex = new AcTrHierarchicalSpatialIndex()
     this._isSpatialIndexBuildDeferred = false
+    this._isMobileRenderOptimized = false
     this._deferredSpatialIndexEntries = new Map()
     this._box = new THREE.Box3()
     this._layers = new Map()
@@ -156,6 +159,13 @@ export class AcTrLayout {
 
   set isSpatialIndexBuildDeferred(value: boolean) {
     this._isSpatialIndexBuildDeferred = value
+  }
+
+  setMobileRenderOptimizationsEnabled(value: boolean) {
+    this._isMobileRenderOptimized = value
+    this._layers.forEach(layer => {
+      layer.internalObject.setMobileFrustumCullingEnabled(value)
+    })
   }
 
   /**
@@ -436,6 +446,9 @@ export class AcTrLayout {
     let layer = this._layers.get(name)
     if (layer === undefined) {
       layer = new AcTrLayer(info)
+      layer.internalObject.setMobileFrustumCullingEnabled(
+        this._isMobileRenderOptimized
+      )
       this._layers.set(name, layer)
       this._group.add(layer.internalObject)
     }
@@ -506,6 +519,10 @@ export class AcTrLayout {
       const layers = this.getLayersByObjectId(id)
       layers.forEach(layer => layer.unselect([id]))
     })
+  }
+
+  clearHighlights() {
+    this._layers.forEach(layer => layer.clearHighlights())
   }
 
   /**

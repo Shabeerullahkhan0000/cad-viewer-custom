@@ -84,8 +84,9 @@
 import {
   AcApDocManager,
   AcApOpenDatabaseOptions,
+  addEventBusListener,
   AcEdOpenMode,
-  eventBus
+  type AcEdEvents
 } from '@mlightcad/cad-simple-viewer'
 import { log } from '@mlightcad/data-model'
 import { ElMessage } from 'element-plus'
@@ -103,6 +104,7 @@ import { useI18n } from 'vue-i18n'
 import { initializeCadViewer } from '../app/app'
 import { store } from '../app/store'
 import {
+  disposeColorThemeSync,
   ensureColorThemeSync,
   isDark,
   setColorTheme,
@@ -256,6 +258,7 @@ const viewerLayoutStyle = computed(() => ({
 provideViewerRect(containerRef)
 
 let headerResizeObserver: ResizeObserver | undefined
+let eventBusDisposers: Array<() => void> = []
 
 const updateHeaderHeight = () => {
   headerHeightPx.value = headerRef.value?.getBoundingClientRect().height ?? 0
@@ -274,6 +277,96 @@ const bindHeaderObserver = () => {
     headerResizeObserver.observe(headerRef.value)
   }
   updateHeaderHeight()
+}
+
+const handleSystemMessage = (params: AcEdEvents['message']) => {
+  ElMessage({
+    message: params.message,
+    grouping: true,
+    type: params.type,
+    showClose: true
+  })
+
+  switch (params.type) {
+    case 'success':
+      success('System Message', params.message)
+      break
+    case 'warning':
+      warning('System Warning', params.message)
+      break
+    case 'error':
+      error('System Error', params.message)
+      break
+    default:
+      info('System Info', params.message)
+      break
+  }
+}
+
+const handleFontsNotLoaded = (params: AcEdEvents['fonts-not-loaded']) => {
+  const fonts = params.fonts.map(font => font.fontName).join(', ')
+  const message = t('main.message.fontsNotLoaded', { fonts })
+  error(t('main.notification.title.fontNotFound'), message)
+}
+
+const handleFontsNotFound = (params: AcEdEvents['fonts-not-found']) => {
+  const message = t('main.message.fontsNotFound', {
+    fonts: params.fonts.join(', ')
+  })
+  warning(t('main.notification.title.fontNotFound'), message)
+}
+
+const handleFailedToGetAvailableFonts = (
+  params: AcEdEvents['failed-to-get-avaiable-fonts']
+) => {
+  ElMessage({
+    message: t('main.message.failedToGetAvaiableFonts', { url: params.url }),
+    grouping: true,
+    type: 'error',
+    showClose: true
+  })
+}
+
+const handleFailedToOpenFile = (
+  params: AcEdEvents['failed-to-open-file']
+) => {
+  const message = t('main.message.failedToOpenFile', {
+    fileName: params.fileName
+  })
+  ElMessage({
+    message,
+    grouping: true,
+    type: 'error',
+    showClose: true
+  })
+  error('File Opening Failed', message)
+}
+
+const handleCloseLayerManager = () => {
+  if (!store.dialogs.layerManager) return
+  if (store.dialogs.activePaletteTab !== 'layerManager') return
+  store.dialogs.layerManager = false
+}
+
+const bindEventBusListeners = () => {
+  if (eventBusDisposers.length > 0) return
+
+  eventBusDisposers = [
+    addEventBusListener('message', handleSystemMessage),
+    addEventBusListener('fonts-not-loaded', handleFontsNotLoaded),
+    addEventBusListener('fonts-not-found', handleFontsNotFound),
+    addEventBusListener(
+      'failed-to-get-avaiable-fonts',
+      handleFailedToGetAvailableFonts
+    ),
+    addEventBusListener('failed-to-open-file', handleFailedToOpenFile),
+    addEventBusListener('close-layer-manager', handleCloseLayerManager)
+  ]
+}
+
+const unbindEventBusListeners = () => {
+  eventBusDisposers.forEach(dispose => dispose())
+  eventBusDisposers = []
 }
 
 const beginPendingOpen = (mode: AcEdOpenMode) => {
@@ -463,6 +556,8 @@ watch(
 
 // Component lifecycle: Initialize and load initial file if URL or localFile is provided
 onMounted(async () => {
+  bindEventBusListeners()
+
   if (props.url || props.localFile) {
     beginDrawingLoad(props.mode)
   }
@@ -513,6 +608,8 @@ onUnmounted(() => {
   emit('destroy')
 
   headerResizeObserver?.disconnect()
+  unbindEventBusListeners()
+  disposeColorThemeSync()
   AcApDocManager.instance.destroy()
 })
 
@@ -530,82 +627,6 @@ watch(
   },
   { immediate: true }
 )
-
-// Set up global event listeners for various CAD operations and notifications
-// These events are emitted by the underlying CAD engine and other components
-
-// Handle general messages from the CAD system (info, warnings, errors)
-eventBus.on('message', params => {
-  // Show both ElMessage and notification center
-  ElMessage({
-    message: params.message,
-    grouping: true,
-    type: params.type,
-    showClose: true
-  })
-
-  // Also add to notification center
-  switch (params.type) {
-    case 'success':
-      success('System Message', params.message)
-      break
-    case 'warning':
-      warning('System Warning', params.message)
-      break
-    case 'error':
-      error('System Error', params.message)
-      break
-    default:
-      info('System Info', params.message)
-      break
-  }
-})
-
-// Handle failure that fonts can't be loaded from remote font repository
-eventBus.on('fonts-not-loaded', params => {
-  const fonts = params.fonts.map(font => font.fontName).join(', ')
-  const message = t('main.message.fontsNotLoaded', { fonts })
-  error(t('main.notification.title.fontNotFound'), message)
-})
-
-// Handle failure that fonts can't be found in remote font repository
-eventBus.on('fonts-not-found', params => {
-  const message = t('main.message.fontsNotFound', {
-    fonts: params.fonts.join(', ')
-  })
-  warning(t('main.notification.title.fontNotFound'), message)
-})
-
-// Handle failures when trying to get available fonts from the system
-eventBus.on('failed-to-get-avaiable-fonts', params => {
-  ElMessage({
-    message: t('main.message.failedToGetAvaiableFonts', { url: params.url }),
-    grouping: true,
-    type: 'error',
-    showClose: true
-  })
-})
-
-// Handle file opening failures with user-friendly error messages
-eventBus.on('failed-to-open-file', params => {
-  const message = t('main.message.failedToOpenFile', {
-    fileName: params.fileName
-  })
-  ElMessage({
-    message,
-    grouping: true,
-    type: 'error',
-    showClose: true
-  })
-  error('File Opening Failed', message)
-})
-
-// Mirror AutoCAD's LAYERCLOSE behavior: only close when the layer tab is open.
-eventBus.on('close-layer-manager', () => {
-  if (!store.dialogs.layerManager) return
-  if (store.dialogs.activePaletteTab !== 'layerManager') return
-  store.dialogs.layerManager = false
-})
 
 // Toggle notification center visibility
 const toggleNotificationCenter = () => {

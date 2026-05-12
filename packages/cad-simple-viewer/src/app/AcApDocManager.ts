@@ -4,10 +4,12 @@ import {
   AcDbDatabaseConverterManager,
   AcDbDxfConverter,
   AcDbFileType,
+  type AcDbParsingTaskResult,
   acdbHostApplicationServices,
   AcDbProgressdEventArgs,
   AcDbSysVarManager,
   AcGeBox2d,
+  createWorkerApi,
   log
 } from '@mlightcad/data-model'
 import { AcDbLibreDwgConverter } from '@mlightcad/libredwg-converter'
@@ -96,6 +98,48 @@ const getIsMobile = () => {
 
   const isMobile = window.matchMedia('(pointer: coarse)').matches
   return isMobile
+}
+
+type MobileLibreDwgWorkerInput = {
+  data: ArrayBuffer
+  fileByteLength: number
+}
+
+class AcApMobileLibreDwgConverter extends AcDbLibreDwgConverter {
+  protected async parse(
+    data: ArrayBuffer,
+    timeout?: number
+  ): Promise<AcDbParsingTaskResult<any>> {
+    const effectiveConfig = this.config
+    if (!(effectiveConfig.useWorker && effectiveConfig.parserWorkerUrl)) {
+      return super.parse(data, timeout)
+    }
+
+    const api = createWorkerApi({
+      workerUrl: effectiveConfig.parserWorkerUrl,
+      timeout: this.getParserWorkerTimeout(data, timeout),
+      maxConcurrentWorkers: 1
+    })
+    try {
+      const workerInput: MobileLibreDwgWorkerInput = {
+        data,
+        fileByteLength: data.byteLength
+      }
+      const result = await api.execute<
+        MobileLibreDwgWorkerInput,
+        AcDbParsingTaskResult<any>
+      >(workerInput)
+      if (result.success) {
+        return result.data as AcDbParsingTaskResult<any>
+      }
+
+      throw new Error(
+        `Failed to parse drawing due to error: '${result.error}'`
+      )
+    } finally {
+      api.destroy()
+    }
+  }
 }
 
 /**
@@ -478,6 +522,7 @@ export class AcApDocManager {
    */
   async destroy() {
     await this._pluginManager.unloadAllPlugins()
+    this.curView.dispose()
     AcApDocManager._instance = undefined
   }
 
@@ -1248,7 +1293,10 @@ export class AcApDocManager {
       !this._registeredWorkerConverters.has(AcDbFileType.DWG)
     ) {
       try {
-        const converter = new AcDbLibreDwgConverter({
+        const LibreDwgConverterCtor = this._isMobile
+          ? AcApMobileLibreDwgConverter
+          : AcDbLibreDwgConverter
+        const converter = new LibreDwgConverterCtor({
           convertByEntityType: false,
           useWorker: true,
           parserWorkerUrl:

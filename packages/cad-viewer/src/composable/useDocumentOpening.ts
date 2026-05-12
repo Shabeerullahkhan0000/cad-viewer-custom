@@ -1,10 +1,16 @@
-import { AcApDocManager, eventBus } from '@mlightcad/cad-simple-viewer'
-import { onMounted, readonly, ref } from 'vue'
+import {
+  AcApDocManager,
+  addEventBusListener
+} from '@mlightcad/cad-simple-viewer'
+import { onMounted, onUnmounted, readonly, ref } from 'vue'
 
 const isDocumentOpening = ref(false)
 
 let isBound = false
 let retryTimer: ReturnType<typeof setInterval> | undefined
+let activeConsumers = 0
+let boundDocManager: AcApDocManager | null = null
+let removeFailedToOpenListener: (() => void) | undefined
 
 function getExistingDocManager(): AcApDocManager | null {
   const singleton = AcApDocManager as unknown as {
@@ -35,11 +41,31 @@ function tryBind() {
 
   docManager.events.documentToBeOpened.addEventListener(beginDocumentOpening)
   docManager.events.documentActivated.addEventListener(endDocumentOpening)
-  eventBus.on('failed-to-open-file', endDocumentOpening)
+  removeFailedToOpenListener = addEventBusListener(
+    'failed-to-open-file',
+    endDocumentOpening
+  )
 
+  boundDocManager = docManager
   isBound = true
   stopRetryTimer()
   return true
+}
+
+function unbind() {
+  stopRetryTimer()
+  if (boundDocManager) {
+    boundDocManager.events.documentToBeOpened.removeEventListener(
+      beginDocumentOpening
+    )
+    boundDocManager.events.documentActivated.removeEventListener(
+      endDocumentOpening
+    )
+  }
+  removeFailedToOpenListener?.()
+  removeFailedToOpenListener = undefined
+  boundDocManager = null
+  isBound = false
 }
 
 function ensureDocumentOpeningSync() {
@@ -51,10 +77,16 @@ function ensureDocumentOpeningSync() {
 }
 
 export function useDocumentOpening() {
-  ensureDocumentOpeningSync()
-
   onMounted(() => {
+    activeConsumers++
     ensureDocumentOpeningSync()
+  })
+
+  onUnmounted(() => {
+    activeConsumers = Math.max(0, activeConsumers - 1)
+    if (activeConsumers === 0) {
+      unbind()
+    }
   })
 
   return {

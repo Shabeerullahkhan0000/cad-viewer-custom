@@ -322,6 +322,20 @@ export class AcTrBatchedGroup extends THREE.Group {
     })
   }
 
+  setMobileFrustumCullingEnabled(enabled: boolean) {
+    this.groups.forEach(group => {
+      group.forEach(batch => {
+        batch.frustumCulled = enabled
+        if (enabled) this.computeBatchBounds(batch)
+      })
+    })
+
+    this._unbatchedObjects.traverse(object => {
+      if (object === this._unbatchedObjects) return
+      object.frustumCulled = enabled
+    })
+  }
+
   /**
    * Return true if this group contains the entity with the specified object id. Otherwise, return false.
    * @param objectId Input the object id of one entity
@@ -502,6 +516,14 @@ export class AcTrBatchedGroup extends THREE.Group {
    */
   unselect(objectId: string) {
     this.unhighlight(objectId, this._selectedObjects)
+  }
+
+  /**
+   * Clears all hover and selection highlight clones owned by this group.
+   */
+  clearHighlights() {
+    this.clearHighlightGroup(this._selectedObjects)
+    this.clearHighlightGroup(this._hoverObjects)
   }
 
   /**
@@ -857,6 +879,20 @@ export class AcTrBatchedGroup extends THREE.Group {
       }
     }
     return memory
+  }
+
+  private computeBatchBounds(object: THREE.Object3D) {
+    const batch = object as THREE.Object3D & {
+      computeBoundingBox?: () => void
+      computeBoundingSphere?: () => void
+    }
+
+    try {
+      batch.computeBoundingBox?.()
+      batch.computeBoundingSphere?.()
+    } catch {
+      object.frustumCulled = false
+    }
   }
 
   /**

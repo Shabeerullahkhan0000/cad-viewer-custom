@@ -9,7 +9,7 @@ import {
   AcDbSystemVariables,
   AcDbSysVarManager
 } from '@mlightcad/data-model'
-import { reactive } from 'vue'
+import { onScopeDispose, reactive } from 'vue'
 
 export const COLOR_THEME_SYSVAR_NAME = AcDbSystemVariables.COLORTHEME
 export const DYNAMIC_MODE_SYSVAR_NAME = AcDbSystemVariables.DYNMODE
@@ -153,6 +153,13 @@ export function useSystemVars(editor: AcApDocManager) {
   )
 
   editor.events.documentActivated.addEventListener(handleDocumentActivated)
+
+  onScopeDispose(() => {
+    AcDbSysVarManager.instance().events.sysVarChanged.removeEventListener(
+      handleSysVarChanged
+    )
+    editor.events.documentActivated.removeEventListener(handleDocumentActivated)
+  })
 
   return reactiveSystemVars
 }

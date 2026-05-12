@@ -91,6 +91,8 @@ export class AcTrScene {
   private _htmlTransientManager: AcTrHtmlTransientManager
   /** True when layout spatial indexes should collect items for a later bulk load. */
   private _isSpatialIndexBuildDeferred: boolean
+  /** True when mobile GPU render optimizations should be applied to layouts. */
+  private _isMobileRenderOptimized: boolean
 
   /**
    * Creates a new CAD scene instance.
@@ -106,6 +108,7 @@ export class AcTrScene {
     this._activeLayoutBtrId = ''
     this._modelSpaceBtrId = ''
     this._isSpatialIndexBuildDeferred = false
+    this._isMobileRenderOptimized = false
   }
 
   /**
@@ -151,6 +154,13 @@ export class AcTrScene {
     this._isSpatialIndexBuildDeferred = value
     this._layouts.forEach(layout => {
       layout.isSpatialIndexBuildDeferred = value
+    })
+  }
+
+  setMobileRenderOptimizationsEnabled(value: boolean) {
+    this._isMobileRenderOptimized = value
+    this._layouts.forEach(layout => {
+      layout.setMobileRenderOptimizationsEnabled(value)
     })
   }
 
@@ -263,6 +273,7 @@ export class AcTrScene {
   addEmptyLayout(ownerId: AcDbObjectId) {
     const layout = new AcTrLayout()
     layout.isSpatialIndexBuildDeferred = this._isSpatialIndexBuildDeferred
+    layout.setMobileRenderOptimizationsEnabled(this._isMobileRenderOptimized)
     this._layouts.set(ownerId, layout)
     this._scene.add(layout.internalObject)
     layout.visible = ownerId == this._activeLayoutBtrId
@@ -345,6 +356,10 @@ export class AcTrScene {
       return true
     }
     return false
+  }
+
+  clearHighlights() {
+    this._layouts.forEach(layout => layout.clearHighlights())
   }
 
   /**

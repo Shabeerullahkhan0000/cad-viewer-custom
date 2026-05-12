@@ -1,10 +1,12 @@
 import {
   AcCmEventManager,
+  AcDbRenderingCache,
   AcGeArea2d,
   AcGeCircArc3d,
   AcGeEllipseArc3d,
   AcGePoint3d,
   AcGePoint3dLike,
+  AcGiEntity,
   AcGiFontMapping,
   AcGiImageStyle,
   AcGiMTextData,
@@ -33,10 +35,73 @@ import { AcTrSubEntityTraitsUtil } from '../util'
 import { AcTrCamera } from '../viewport'
 import { AcTrMTextRenderer } from './AcTrMTextRenderer'
 
+type CameraZoomUniform = { value: number }
+type RenderingCacheEntry = {
+  key: string
+  size: number
+  updatedAt: number
+}
+
+type RenderingCacheStats = {
+  count: number
+  totalBytes: number
+  maxBytes: number
+  targetBytes: number
+  entries: RenderingCacheEntry[]
+}
+
+type RenderingCacheRuntime = {
+  set: AcDbRenderingCache['set']
+  get: AcDbRenderingCache['get']
+  has: AcDbRenderingCache['has']
+  clear: AcDbRenderingCache['clear']
+  _blocks?: Map<string, AcGiEntity>
+  __mobileLruInstalled?: boolean
+  __mobileLruEntries?: Map<string, RenderingCacheEntry>
+  __mobileLruTotalBytes?: number
+  getStats?: () => RenderingCacheStats
+}
+
+const MOBILE_RENDERING_CACHE_MAX_BYTES = 40 * 1024 * 1024
+const MOBILE_RENDERING_CACHE_TARGET_BYTES = 30 * 1024 * 1024
+
+const getIsMobile = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+
+  const isMobile = window.matchMedia('(pointer: coarse)').matches
+  return isMobile
+}
+
+const getIsDevRuntime = () => {
+  const meta = import.meta as ImportMeta & {
+    env?: {
+      DEV?: boolean
+    }
+  }
+
+  if (typeof meta.env?.DEV === 'boolean') return meta.env.DEV
+  if (typeof window === 'undefined') return false
+  return (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1'
+  )
+}
+
 export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
+  private static _isMobileRenderingCacheLimitInstalled = false
   private _styleManager: AcTrStyleManager
   private _renderer: THREE.WebGLRenderer
   private _subEntityTraits: AcGiSubEntityTraits
+  private readonly _isMobile = getIsMobile()
+  private _isFrameUniformBatching = false
+  private _hasFlushedFrameUniforms = false
+  private _pendingCameraZoom = 1
+  private _dirtyCameraZoomUniforms = new Set<CameraZoomUniform>()
+  private readonly _frustum = new THREE.Frustum()
+  private readonly _projectionScreenMatrix = new THREE.Matrix4()
+  private readonly _visibleMaterials = new Set<THREE.Material>()
 
   public readonly events = {
     fontNotFound: new AcCmEventManager<FontManagerEventArgs>()
@@ -44,6 +109,9 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
 
   constructor(renderer: THREE.WebGLRenderer) {
     this._renderer = renderer
+    if (this._isMobile) {
+      AcTrRenderer.installMobileRenderingCacheLimit()
+    }
     this._styleManager = new AcTrStyleManager()
     const size = renderer.getSize(new THREE.Vector2())
     this._styleManager.updateLineResolution(size.x, size.y)
@@ -77,6 +145,10 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
     this._styleManager.updateLineResolution(width, height)
   }
 
+  setPixelRatio(pixelRatio: number) {
+    this._renderer.setPixelRatio(pixelRatio)
+  }
+
   getViewport(target: THREE.Vector4) {
     return this._renderer.getViewport(target)
   }
@@ -93,8 +165,30 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
   }
 
   render(scene: THREE.Object3D, camera: AcTrCamera) {
-    this.updateCameraZoomUniform(camera.zoom)
+    this.queueCameraZoomUniform(camera.zoom, scene, camera)
+    this.flushCameraZoomUniformsIfNeeded()
     this._renderer.render(scene, camera.internalCamera)
+  }
+
+  beginFrame() {
+    if (!this._isMobile) return
+
+    this._isFrameUniformBatching = true
+    this._hasFlushedFrameUniforms = false
+    this._dirtyCameraZoomUniforms.clear()
+  }
+
+  endFrame() {
+    if (!this._isMobile) return
+
+    this.flushCameraZoomUniforms()
+    this._isFrameUniformBatching = false
+    this._hasFlushedFrameUniforms = false
+    this._dirtyCameraZoomUniforms.clear()
+  }
+
+  resetState() {
+    this._renderer.resetState()
   }
 
   /**
@@ -354,8 +448,260 @@ export class AcTrRenderer implements AcGiRenderer<AcTrEntity> {
   /**
    * Updates camera zoom value for shader materials
    */
-  private updateCameraZoomUniform(zoom: number) {
-    // DxfLoader.CameraZoomUniform.value = (zoom * this.container.height) / 50;
-    AcTrMaterialManager.CameraZoomUniform.value = zoom
+  private queueCameraZoomUniform(
+    zoom: number,
+    scene?: THREE.Object3D,
+    camera?: AcTrCamera
+  ) {
+    this._pendingCameraZoom = zoom
+
+    if (!this._isMobile || !this._isFrameUniformBatching) {
+      AcTrMaterialManager.CameraZoomUniform.value = zoom
+      return
+    }
+
+    const uniforms =
+      scene && camera
+        ? this.collectVisibleCameraZoomUniforms(scene, camera)
+        : undefined
+
+    if (!uniforms || uniforms.size === 0) {
+      this._dirtyCameraZoomUniforms.add(AcTrMaterialManager.CameraZoomUniform)
+      return
+    }
+
+    uniforms.forEach(uniform => this._dirtyCameraZoomUniforms.add(uniform))
+  }
+
+  private flushCameraZoomUniformsIfNeeded() {
+    if (!this._isMobile || !this._isFrameUniformBatching) {
+      this.flushCameraZoomUniforms()
+      return
+    }
+
+    if (this._hasFlushedFrameUniforms) return
+    this.flushCameraZoomUniforms()
+    this._hasFlushedFrameUniforms = true
+  }
+
+  private flushCameraZoomUniforms() {
+    if (this._dirtyCameraZoomUniforms.size === 0) {
+      AcTrMaterialManager.CameraZoomUniform.value = this._pendingCameraZoom
+      return
+    }
+
+    this._dirtyCameraZoomUniforms.forEach(uniform => {
+      uniform.value = this._pendingCameraZoom
+    })
+    this._dirtyCameraZoomUniforms.clear()
+  }
+
+  private collectVisibleCameraZoomUniforms(
+    scene: THREE.Object3D,
+    camera: AcTrCamera
+  ) {
+    this._visibleMaterials.clear()
+    this.updateFrustum(camera)
+
+    scene.traverseVisible(object => {
+      if (!this.isObjectVisibleInCurrentFrustum(object)) return
+      const material = (object as THREE.Object3D & {
+        material?: THREE.Material | THREE.Material[]
+      }).material
+      if (!material) return
+
+      if (Array.isArray(material)) {
+        material.forEach(item => this._visibleMaterials.add(item))
+      } else {
+        this._visibleMaterials.add(material)
+      }
+    })
+
+    const uniforms = new Set<CameraZoomUniform>()
+    this._visibleMaterials.forEach(material => {
+      const uniform = (material as THREE.ShaderMaterial).uniforms?.u_cameraZoom
+      if (uniform && typeof uniform.value === 'number') {
+        uniforms.add(uniform as CameraZoomUniform)
+      }
+    })
+    this._visibleMaterials.clear()
+    return uniforms
+  }
+
+  private updateFrustum(camera: AcTrCamera) {
+    const internalCamera = camera.internalCamera
+    internalCamera.updateMatrixWorld()
+    this._projectionScreenMatrix.multiplyMatrices(
+      internalCamera.projectionMatrix,
+      internalCamera.matrixWorldInverse
+    )
+    this._frustum.setFromProjectionMatrix(this._projectionScreenMatrix)
+  }
+
+  private isObjectVisibleInCurrentFrustum(object: THREE.Object3D) {
+    if (!('geometry' in object)) return true
+
+    try {
+      return this._frustum.intersectsObject(object)
+    } catch {
+      return true
+    }
+  }
+
+  private static installMobileRenderingCacheLimit() {
+    if (AcTrRenderer._isMobileRenderingCacheLimitInstalled) return
+
+    const cache =
+      AcDbRenderingCache.instance as unknown as RenderingCacheRuntime
+    const blocks = cache._blocks
+    if (!blocks) return
+
+    AcTrRenderer._isMobileRenderingCacheLimitInstalled = true
+    cache.__mobileLruInstalled = true
+    cache.__mobileLruEntries = new Map()
+    cache.__mobileLruTotalBytes = 0
+
+    const originalSet = cache.set.bind(cache)
+    const originalGet = cache.get.bind(cache)
+    const originalHas = cache.has.bind(cache)
+    const originalClear = cache.clear.bind(cache)
+    const entries = cache.__mobileLruEntries
+
+    const touch = (key: string) => {
+      const entry = entries.get(key)
+      if (!entry) return
+      entry.updatedAt = Date.now()
+      entries.delete(key)
+      entries.set(key, entry)
+    }
+
+    const evictIfNeeded = () => {
+      let evictedCount = 0
+      let evictedBytes = 0
+
+      while (
+        (cache.__mobileLruTotalBytes ?? 0) >
+          MOBILE_RENDERING_CACHE_MAX_BYTES &&
+        entries.size > 0
+      ) {
+        const oldest = entries.values().next().value as
+          | RenderingCacheEntry
+          | undefined
+        if (!oldest) break
+
+        const cachedEntity = blocks.get(oldest.key)
+        if (cachedEntity) {
+          AcTrRenderer.disposeCachedRenderingGeometry(cachedEntity)
+        }
+        blocks.delete(oldest.key)
+        entries.delete(oldest.key)
+        cache.__mobileLruTotalBytes =
+          (cache.__mobileLruTotalBytes ?? 0) - oldest.size
+        evictedCount++
+        evictedBytes += oldest.size
+
+        if (
+          (cache.__mobileLruTotalBytes ?? 0) <=
+          MOBILE_RENDERING_CACHE_TARGET_BYTES
+        ) {
+          break
+        }
+      }
+
+      if (evictedCount > 0 && getIsDevRuntime()) {
+        console.warn('[AcDbRenderingCache] mobile LRU evicted entries', {
+          evictedCount,
+          evictedBytes,
+          totalBytes: cache.__mobileLruTotalBytes
+        })
+      }
+    }
+
+    cache.set = (key: string, group: AcGiEntity) => {
+      const previous = entries.get(key)
+      if (previous) {
+        cache.__mobileLruTotalBytes =
+          (cache.__mobileLruTotalBytes ?? 0) - previous.size
+        entries.delete(key)
+      }
+
+      const stored = originalSet(key, group)
+      const cachedEntity = blocks.get(key) ?? stored
+      const size = AcTrRenderer.estimateCachedRenderingSize(cachedEntity)
+      entries.set(key, {
+        key,
+        size,
+        updatedAt: Date.now()
+      })
+      cache.__mobileLruTotalBytes =
+        (cache.__mobileLruTotalBytes ?? 0) + size
+      evictIfNeeded()
+      return stored
+    }
+
+    cache.get = (key: string) => {
+      const result = originalGet(key)
+      if (result) touch(key)
+      return result
+    }
+
+    cache.has = (key: string) => {
+      const result = originalHas(key)
+      if (result) touch(key)
+      return result
+    }
+
+    cache.clear = () => {
+      blocks.forEach((entity: AcGiEntity) => {
+        AcTrRenderer.disposeCachedRenderingGeometry(entity)
+      })
+      entries.clear()
+      cache.__mobileLruTotalBytes = 0
+      originalClear()
+    }
+
+    cache.getStats = () => ({
+      count: entries.size,
+      totalBytes: cache.__mobileLruTotalBytes ?? 0,
+      maxBytes: MOBILE_RENDERING_CACHE_MAX_BYTES,
+      targetBytes: MOBILE_RENDERING_CACHE_TARGET_BYTES,
+      entries: Array.from(entries.values())
+    })
+  }
+
+  private static estimateCachedRenderingSize(entity: AcGiEntity) {
+    let size = 0
+    const maybeObject = entity as unknown as THREE.Object3D
+    maybeObject.traverse?.(object => {
+      size += 512
+      const geometry = (object as THREE.Object3D & {
+        geometry?: THREE.BufferGeometry
+      }).geometry
+      if (!geometry) return
+
+      Object.values(geometry.attributes).forEach(attribute => {
+        const array = attribute.array as ArrayLike<number> & {
+          byteLength?: number
+        }
+        size += array.byteLength ?? array.length * 4
+      })
+      const indexArray = geometry.index?.array as
+        | (ArrayLike<number> & {
+            byteLength?: number
+          })
+        | undefined
+      if (indexArray) size += indexArray.byteLength ?? indexArray.length * 4
+    })
+    return size
+  }
+
+  private static disposeCachedRenderingGeometry(entity: AcGiEntity) {
+    const maybeObject = entity as unknown as THREE.Object3D
+    maybeObject.traverse?.(object => {
+      const geometry = (object as THREE.Object3D & {
+        geometry?: THREE.BufferGeometry
+      }).geometry
+      geometry?.dispose()
+    })
   }
 }

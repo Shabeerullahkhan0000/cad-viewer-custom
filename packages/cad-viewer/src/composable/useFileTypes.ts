@@ -1,5 +1,5 @@
 import { AcDbDatabaseConverterManager } from '@mlightcad/data-model'
-import { ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
 
 export function useFileTypes() {
   const fileTypes = ref<Set<string>>(new Set())
@@ -7,8 +7,16 @@ export function useFileTypes() {
   for (const item of register.fileTypes) {
     fileTypes.value.add(item)
   }
-  register.events.registered.addEventListener(args => {
+
+  const handleRegistered = (args: { fileType: string }) => {
     fileTypes.value.add(args.fileType)
+  }
+
+  register.events.registered.addEventListener(handleRegistered)
+
+  onScopeDispose(() => {
+    register.events.registered.removeEventListener(handleRegistered)
   })
+
   return fileTypes
 }

@@ -1,10 +1,10 @@
 import {
   AcApDocManager,
   AcApSettingManager,
-  eventBus
+  addEventBusListener
 } from '@mlightcad/cad-simple-viewer'
 import { AcDbObjectId } from '@mlightcad/data-model'
-import { reactive } from 'vue'
+import { onMounted, onUnmounted, reactive } from 'vue'
 
 export interface ImageMappingData {
   fileName: string
@@ -40,12 +40,27 @@ export function useMissedData() {
     })
   }
 
-  AcApDocManager.instance.events.documentActivated.addEventListener(() => {
+  let removeFontNotFoundListener: (() => void) | undefined
+  const handleDocumentActivated = () => reset()
+  const handleFontNotFound = () => reset()
+
+  onMounted(() => {
+    AcApDocManager.instance.events.documentActivated.addEventListener(
+      handleDocumentActivated
+    )
+    removeFontNotFoundListener = addEventBusListener(
+      'font-not-found',
+      handleFontNotFound
+    )
     reset()
   })
 
-  eventBus.on('font-not-found', _ => {
-    reset()
+  onUnmounted(() => {
+    AcApDocManager.instance.events.documentActivated.removeEventListener(
+      handleDocumentActivated
+    )
+    removeFontNotFoundListener?.()
+    removeFontNotFoundListener = undefined
   })
 
   return {

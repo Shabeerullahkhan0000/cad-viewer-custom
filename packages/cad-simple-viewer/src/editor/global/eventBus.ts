@@ -1,5 +1,5 @@
 import { AcDbProgressdEventArgs } from '@mlightcad/data-model'
-import mitt, { type Emitter } from 'mitt'
+import mitt, { type Emitter, type Handler } from 'mitt'
 
 import { AcEdMessageType } from '../input/ui/AcEdMessageType'
 
@@ -107,6 +107,14 @@ export type AcEdEvents = {
  * ```
  */
 export const eventBus: Emitter<AcEdEvents> = mitt<AcEdEvents>()
+
+export const addEventBusListener = <Type extends keyof AcEdEvents>(
+  type: Type,
+  handler: Handler<AcEdEvents[Type]>
+) => {
+  eventBus.on(type, handler)
+  return () => eventBus.off(type, handler)
+}
 
 const eventBusState = {
   isBulkLoading: false

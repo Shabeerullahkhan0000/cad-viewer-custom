@@ -233,6 +233,13 @@ export class AcTrLayer {
   }
 
   /**
+   * Clears transient hover/selection highlight clones without removing entities.
+   */
+  clearHighlights() {
+    this._group.clearHighlights()
+  }
+
+  /**
    * Hover the specified entities
    */
   hover(ids: AcDbObjectId[]) {

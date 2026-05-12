@@ -47,6 +47,8 @@ export class AcTrLayoutView extends AcTrBaseView {
   private _mode: AcEdViewMode
   /** Map of viewport views indexed by viewport ID */
   private _viewportViews: Map<string, AcTrViewportView>
+  /** Mobile GPUs cannot afford paper-space viewport render passes during interaction. */
+  private _skipPaperSpaceViewportRenderPasses: boolean
 
   /**
    * Construct one instance of this class.
@@ -60,12 +62,15 @@ export class AcTrLayoutView extends AcTrBaseView {
     renderer: AcTrRenderer,
     layoutBtrId: string,
     width: number,
-    height: number
+    height: number,
+    skipPaperSpaceViewportRenderPasses = false
   ) {
     super(renderer, width, height)
     this._layoutBtrId = layoutBtrId
     this._mode = AcEdViewMode.SELECTION
     this._viewportViews = new Map()
+    this._skipPaperSpaceViewportRenderPasses =
+      skipPaperSpaceViewportRenderPasses
   }
 
   /**
@@ -173,6 +178,10 @@ export class AcTrLayoutView extends AcTrBaseView {
   render(scene: AcTrScene) {
     this._renderer.clear()
     this._renderer.render(scene.internalScene, this._camera)
+    if (this._skipPaperSpaceViewportRenderPasses) {
+      return
+    }
+
     const modelSpaceLayout = scene.modelSpaceLayout
     if (modelSpaceLayout) {
       this.drawViewports(modelSpaceLayout.internalObject)

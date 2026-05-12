@@ -1,8 +1,12 @@
-import { AcApDocManager } from '@mlightcad/cad-simple-viewer'
+import {
+  AcApDocManager,
+  type AcDbDocumentEventArgs
+} from '@mlightcad/cad-simple-viewer'
 import {
   type AcDbColorTheme,
   AcDbDatabase,
   AcDbSystemVariables,
+  type AcDbSysVarEventArgs,
   AcDbSysVarManager
 } from '@mlightcad/data-model'
 import { computed, ref } from 'vue'
@@ -14,6 +18,7 @@ import {
 
 const currentTheme = ref<AcDbColorTheme>('dark')
 let isThemeSyncInitialized = false
+let syncedDocManager: AcApDocManager | null = null
 
 function applyThemeToDom(theme: AcDbColorTheme) {
   if (typeof document === 'undefined') return
@@ -43,27 +48,48 @@ function syncThemeFromDatabase(database: AcDbDatabase | null) {
   updateCurrentTheme(getColorThemeFromDatabase(database))
 }
 
-export function ensureColorThemeSync() {
-  if (isThemeSyncInitialized) return
+function handleColorThemeSysVarChanged(args: AcDbSysVarEventArgs) {
+  if (args.name.toLowerCase() !== AcDbSystemVariables.COLORTHEME.toLowerCase()) {
+    return
+  }
+  updateCurrentTheme(getColorThemeFromDatabase(args.database))
+}
 
+function handleColorThemeDocumentActivated(args: AcDbDocumentEventArgs) {
+  syncThemeFromDatabase(args.doc.database)
+}
+
+export function disposeColorThemeSync() {
+  AcDbSysVarManager.instance().events.sysVarChanged.removeEventListener(
+    handleColorThemeSysVarChanged
+  )
+  syncedDocManager?.events.documentActivated.removeEventListener(
+    handleColorThemeDocumentActivated
+  )
+  syncedDocManager = null
+  isThemeSyncInitialized = false
+}
+
+export function ensureColorThemeSync() {
   const docManager = getExistingDocManager()
   if (!docManager) return
 
+  if (isThemeSyncInitialized && syncedDocManager === docManager) return
+  if (syncedDocManager && syncedDocManager !== docManager) {
+    disposeColorThemeSync()
+  }
+
   isThemeSyncInitialized = true
+  syncedDocManager = docManager
   syncThemeFromDatabase(getCurrentDatabase())
 
-  AcDbSysVarManager.instance().events.sysVarChanged.addEventListener(args => {
-    if (
-      args.name.toLowerCase() !== AcDbSystemVariables.COLORTHEME.toLowerCase()
-    ) {
-      return
-    }
-    updateCurrentTheme(getColorThemeFromDatabase(args.database))
-  })
+  AcDbSysVarManager.instance().events.sysVarChanged.addEventListener(
+    handleColorThemeSysVarChanged
+  )
 
-  docManager.events.documentActivated.addEventListener(args => {
-    syncThemeFromDatabase(args.doc.database)
-  })
+  docManager.events.documentActivated.addEventListener(
+    handleColorThemeDocumentActivated
+  )
 }
 
 export function setColorTheme(

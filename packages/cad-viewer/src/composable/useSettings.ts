@@ -1,12 +1,19 @@
 import { AcApSettingManager, AcApSettings } from '@mlightcad/cad-simple-viewer'
-import { reactive } from 'vue'
+import { onScopeDispose, reactive } from 'vue'
 
 export function useSettings() {
-  const settings = reactive<AcApSettings>(AcApSettingManager.instance.settings)
+  const manager = AcApSettingManager.instance
+  const settings = reactive<AcApSettings>(manager.settings)
 
-  AcApSettingManager.instance.events.modified.addEventListener(args => {
+  const handleModified = (args: { key: string; value: unknown }) => {
     // @ts-expect-error Hard to describe its type
     settings[args.key] = args.value
+  }
+
+  manager.events.modified.addEventListener(handleModified)
+
+  onScopeDispose(() => {
+    manager.events.modified.removeEventListener(handleModified)
   })
 
   return settings
