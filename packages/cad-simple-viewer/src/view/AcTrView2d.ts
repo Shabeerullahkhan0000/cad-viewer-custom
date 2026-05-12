@@ -79,6 +79,31 @@ export const DEFAULT_VIEW_2D_OPTIONS: AcTrView2dOptions = {
 }
 
 const ENTITY_RENDER_SLICE_BUDGET_MS = 8
+const MOBILE_FIRST_PROGRESSIVE_RENDER_AT = 20
+const MOBILE_PROGRESSIVE_RENDER_INTERVAL = 100
+
+const waitForMobileCpuTask = () =>
+  new Promise<void>(resolve => {
+    const scheduler = (
+      typeof globalThis !== 'undefined'
+        ? (globalThis as {
+            scheduler?: {
+              postTask?: (callback: () => void) => Promise<unknown>
+            }
+          }).scheduler
+        : undefined
+    )
+
+    if (typeof scheduler?.postTask === 'function') {
+      scheduler.postTask(resolve).catch(error => {
+        log.warn('[AcTrView2d] scheduler.postTask failed, falling back:', error)
+        setTimeout(resolve, 0)
+      })
+      return
+    }
+
+    setTimeout(resolve, 0)
+  })
 
 /**
  * A 2D CAD viewer component that renders CAD drawings using Three.js.
@@ -129,6 +154,8 @@ export class AcTrView2d extends AcEdBaseView {
   private _numOfEntitiesToProcess: number
   /** CSS2D renderer for HTML transient overlays */
   private _css2dRenderer: CSS2DRenderer
+  /** Invalidates pending mobile deferred-index flushes when a new load starts. */
+  private _mobileSpatialIndexFlushToken = 0
 
   /**
    * Creates a new 2D CAD viewer instance.
@@ -225,14 +252,9 @@ export class AcTrView2d extends AcEdBaseView {
     let selectionStartWcs: AcGePoint2dLike | null = null
     let selectionStartCanvas: AcGePoint2dLike | null = null
     let selectionPreviewEl: HTMLDivElement | null = null
-    let lastTouchPointerAt = 0
 
     const canHandleSelectionGesture = () => {
       return this.mode === AcEdViewMode.SELECTION && !this.editor.isActive
-    }
-
-    const shouldIgnoreMouseSelection = () => {
-      return Date.now() - lastTouchPointerAt < 700
     }
 
     const clearSelectionPreview = () => {
@@ -240,34 +262,13 @@ export class AcTrView2d extends AcEdBaseView {
       selectionPreviewEl = null
     }
 
-    const suppressSelectionAfterTouch = () => {
-      lastTouchPointerAt = Date.now()
-      clearSelectionPreview()
-      selectionStartWcs = null
-      selectionStartCanvas = null
-    }
-
-    const handleTouchPointer = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') {
-        suppressSelectionAfterTouch()
-      }
-    }
-
-    this.canvas.addEventListener('pointerdown', handleTouchPointer, {
-      passive: true
-    })
-    this.canvas.addEventListener('pointermove', handleTouchPointer, {
-      passive: true
-    })
-    this.canvas.addEventListener('pointerup', handleTouchPointer, {
-      passive: true
-    })
-    this.canvas.addEventListener('pointercancel', handleTouchPointer, {
-      passive: true
-    })
-
     this.canvas.addEventListener('mousedown', e => {
-      if (shouldIgnoreMouseSelection()) return
+      if (this.shouldIgnoreMouseEvent(e)) {
+        clearSelectionPreview()
+        selectionStartWcs = null
+        selectionStartCanvas = null
+        return
+      }
       if (e.button !== 0) return
       if (!canHandleSelectionGesture()) return
 
@@ -283,7 +284,7 @@ export class AcTrView2d extends AcEdBaseView {
     })
 
     this.canvas.addEventListener('mousemove', e => {
-      if (shouldIgnoreMouseSelection()) return
+      if (this.shouldIgnoreMouseEvent(e)) return
       if (!selectionStartWcs || !selectionPreviewEl || !selectionStartCanvas) {
         return
       }
@@ -315,7 +316,12 @@ export class AcTrView2d extends AcEdBaseView {
     })
 
     this.canvas.addEventListener('mouseup', e => {
-      if (shouldIgnoreMouseSelection()) return
+      if (this.shouldIgnoreMouseEvent(e)) {
+        clearSelectionPreview()
+        selectionStartWcs = null
+        selectionStartCanvas = null
+        return
+      }
       if (!selectionStartWcs || !selectionStartCanvas) return
 
       const endCanvas = this.viewportToCanvas({
@@ -683,7 +689,7 @@ export class AcTrView2d extends AcEdBaseView {
         point,
         hitRadius ?? this.selectionBoxSize
       )
-      const firstQueryResults = this._scene.search(box)
+      const firstQueryResults = this.search(box)
 
       const threshold = Math.max(box.size.width / 2, box.size.height / 2)
       const raycaster = activeLayoutView.resetRaycaster(point, threshold)
@@ -704,6 +710,10 @@ export class AcTrView2d extends AcEdBaseView {
    * @inheritdoc
    */
   search(box: AcGeBox2d | AcGeBox3d) {
+    if (this.isMobileInput && this._scene.isSpatialIndexBuildDeferred) {
+      return []
+    }
+
     return this._scene.search(box)
   }
 
@@ -882,6 +892,7 @@ export class AcTrView2d extends AcEdBaseView {
    * @inheritdoc
    */
   clear() {
+    this._mobileSpatialIndexFlushToken++
     this._scene.clear()
     this._isDirty = true
     this._missedImages.clear()
@@ -927,6 +938,40 @@ export class AcTrView2d extends AcEdBaseView {
     return new AcTrScene()
   }
 
+  beginMobileBulkLoad() {
+    if (!this.isMobileInput) return
+
+    this._mobileSpatialIndexFlushToken++
+    this._scene.isSpatialIndexBuildDeferred = true
+    this.clearHover()
+  }
+
+  async endMobileBulkLoad() {
+    if (!this.isMobileInput) return
+
+    const token = ++this._mobileSpatialIndexFlushToken
+    try {
+      while (
+        this._numOfEntitiesToProcess > 0 &&
+        token === this._mobileSpatialIndexFlushToken
+      ) {
+        await waitForMobileCpuTask()
+      }
+
+      if (token !== this._mobileSpatialIndexFlushToken) return
+
+      await waitForMobileCpuTask()
+      this._scene.flushDeferredSpatialIndex()
+      this._isDirty = true
+    } catch (error) {
+      log.error('[AcTrView2d] Failed to flush deferred spatial index:', error)
+    } finally {
+      if (token === this._mobileSpatialIndexFlushToken) {
+        this._scene.isSpatialIndexBuildDeferred = false
+      }
+    }
+  }
+
   private createStats(show?: boolean) {
     const stats = new Stats()
     document.body.appendChild(stats.dom)
@@ -962,12 +1007,7 @@ export class AcTrView2d extends AcEdBaseView {
     })
 
     if (!this._isDirty) return
-    this._layoutViewManager.render(this._scene)
-    if (this.internalCamera) {
-      this._css2dRenderer.render(this._scene.internalScene, this.internalCamera)
-    }
-    this._stats?.update()
-    this._isDirty = false
+    this.renderCurrentFrame()
   }
 
   private startAnimationLoop() {
@@ -994,6 +1034,9 @@ export class AcTrView2d extends AcEdBaseView {
         this.events.viewChanged.dispatch()
         this.clearHover()
       })
+      if (this.isMobileInput) {
+        layoutView.mode = AcEdViewMode.PAN
+      }
       this._layoutViewManager.add(layoutView)
     }
     return layoutView
@@ -1089,6 +1132,7 @@ export class AcTrView2d extends AcEdBaseView {
    */
   private async batchConvert(entities: AcDbEntity[]) {
     let sliceStartedAt = this.now()
+    let convertedEntityCount = 0
     for (let i = 0; i < entities.length; ++i) {
       const entity = entities[i]
       try {
@@ -1147,6 +1191,11 @@ export class AcTrView2d extends AcEdBaseView {
           const fileName = entity.imageFileName
           if (fileName) this._missedImages.set(entity.objectId, fileName)
         }
+        convertedEntityCount++
+        if (this.shouldRenderMobileProgressiveFrame(convertedEntityCount)) {
+          await this.renderMobileProgressiveFrame()
+          sliceStartedAt = this.now()
+        }
       } catch (error) {
         log.error(
           `[AcTrView2d] Failed to convert entity ${entity.objectId} (${entity.type}):`,
@@ -1163,6 +1212,33 @@ export class AcTrView2d extends AcEdBaseView {
         sliceStartedAt = this.now()
       }
     }
+  }
+
+  private shouldRenderMobileProgressiveFrame(convertedEntityCount: number) {
+    if (!this.isMobileInput) return false
+
+    return (
+      convertedEntityCount === MOBILE_FIRST_PROGRESSIVE_RENDER_AT ||
+      (convertedEntityCount > MOBILE_FIRST_PROGRESSIVE_RENDER_AT &&
+        (convertedEntityCount - MOBILE_FIRST_PROGRESSIVE_RENDER_AT) %
+          MOBILE_PROGRESSIVE_RENDER_INTERVAL ===
+          0)
+    )
+  }
+
+  private async renderMobileProgressiveFrame() {
+    if (!this._isDirty) return
+    await this.waitForNextRenderSlice()
+    this.renderCurrentFrame()
+  }
+
+  private renderCurrentFrame() {
+    this._layoutViewManager.render(this._scene)
+    if (this.internalCamera) {
+      this._css2dRenderer.render(this._scene.internalScene, this.internalCamera)
+    }
+    this._stats?.update()
+    this._isDirty = false
   }
 
   private shouldYieldEntityRenderSlice(

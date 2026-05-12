@@ -1,4 +1,8 @@
-import { AcApDocManager } from '@mlightcad/cad-simple-viewer'
+import {
+  AcApDocManager,
+  AcDbDocumentEventArgs,
+  isEventBusBulkLoading
+} from '@mlightcad/cad-simple-viewer'
 import {
   type AcDbColorTheme,
   AcDbDatabase,
@@ -17,6 +21,15 @@ export interface SystemVariables {
   colortheme?: AcDbColorTheme
   dynmode?: number
   lwdisplay?: number
+}
+
+const getIsMobile = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+
+  const isMobile = window.matchMedia('(pointer: coarse)').matches
+  return isMobile
 }
 
 function getDatabaseSysVarValue(database: AcDbDatabase, name: string): unknown {
@@ -85,6 +98,9 @@ export function setColorThemeForDatabase(
 export function useSystemVars(editor: AcApDocManager) {
   const reactiveSystemVars = reactive<SystemVariables>({})
   const doc = editor.curDocument
+  const isMobile = getIsMobile()
+  const shouldBufferBulkLoadEvents = () =>
+    isMobile && isEventBusBulkLoading()
 
   const reset = (doc: AcDbDatabase) => {
     reactiveSystemVars.pdmode = doc.pdmode
@@ -99,7 +115,15 @@ export function useSystemVars(editor: AcApDocManager) {
   }
   reset(doc.database)
 
-  AcDbSysVarManager.instance().events.sysVarChanged.addEventListener(args => {
+  const handleSysVarChanged = (args: {
+    name: string
+    newVal: unknown
+    database: AcDbDatabase
+  }) => {
+    if (shouldBufferBulkLoadEvents()) {
+      return
+    }
+
     const name = args.name.toLowerCase()
     if (name === COLOR_THEME_SYSVAR_NAME.toLowerCase()) {
       reactiveSystemVars.colortheme = normalizeColorTheme(args.newVal)
@@ -118,11 +142,17 @@ export function useSystemVars(editor: AcApDocManager) {
 
     // @ts-expect-error no good way to fix type errors here
     reactiveSystemVars[name] = args.database[name]
-  })
+  }
 
-  editor.events.documentActivated.addEventListener(args => {
+  const handleDocumentActivated = (args: AcDbDocumentEventArgs) => {
     reset(args.doc.database)
-  })
+  }
+
+  AcDbSysVarManager.instance().events.sysVarChanged.addEventListener(
+    handleSysVarChanged
+  )
+
+  editor.events.documentActivated.addEventListener(handleDocumentActivated)
 
   return reactiveSystemVars
 }

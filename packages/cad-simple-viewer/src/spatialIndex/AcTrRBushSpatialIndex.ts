@@ -21,7 +21,18 @@ export class AcTrRBushSpatialIndex implements AcTrSpatialIndex {
   }
 
   load(items: readonly AcEdSpatialQueryResultItem[]) {
-    this.tree.load(items)
+    const uniqueItems = new Map<AcDbObjectId, AcEdSpatialQueryResultItem>()
+    for (const item of items) {
+      if (!this.idMap.has(item.id) && !uniqueItems.has(item.id)) {
+        uniqueItems.set(item.id, item)
+      }
+    }
+
+    const itemsToLoad = Array.from(uniqueItems.values())
+    if (itemsToLoad.length === 0) return
+
+    this.tree.load(itemsToLoad)
+    itemsToLoad.forEach(item => this.idMap.set(item.id, item))
   }
 
   remove(

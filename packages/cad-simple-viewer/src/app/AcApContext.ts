@@ -1,12 +1,47 @@
 import {
+  AcDbEntity,
   AcDbLayout,
   AcDbSystemVariables,
-  AcDbSysVarManager
+  AcDbSysVarManager,
+  log
 } from '@mlightcad/data-model'
 
 import { AcEdBaseView } from '../editor/view/AcEdBaseView'
 import { AcTrView2d } from '../view'
 import { AcApDocument } from './AcApDocument'
+
+const MOBILE_ENTITY_APPEND_CHUNK_SIZE = 50
+
+const getIsMobile = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+
+  const isMobile = window.matchMedia('(pointer: coarse)').matches
+  return isMobile
+}
+
+const scheduleMobileBridgeTask = (callback: () => void) => {
+  const scheduler = (
+    typeof globalThis !== 'undefined'
+      ? (globalThis as {
+          scheduler?: {
+            postTask?: (callback: () => void) => Promise<unknown>
+          }
+        }).scheduler
+      : undefined
+  )
+
+  if (typeof scheduler?.postTask === 'function') {
+    scheduler.postTask(callback).catch(error => {
+      log.warn('[AcApContext] scheduler.postTask failed, falling back:', error)
+      setTimeout(callback, 0)
+    })
+    return
+  }
+
+  setTimeout(callback, 0)
+}
 
 /**
  * Application context that binds a CAD document with its associated view.
@@ -36,6 +71,14 @@ export class AcApContext {
   private _view: AcEdBaseView
   /** The document containing the CAD database */
   private _doc: AcApDocument
+  /** Mobile gate used to keep desktop document/view synchronization untouched. */
+  private readonly _isMobile = getIsMobile()
+  /** Entity append events waiting for chunked mobile bridge delivery. */
+  private _pendingEntityAppends: AcDbEntity[] = []
+  /** True while a mobile entity-drain task is already scheduled. */
+  private _isEntityAppendDrainScheduled = false
+  /** Resolvers waiting until the mobile entity append buffer is empty. */
+  private _entityAppendIdleResolvers: Array<() => void> = []
 
   /**
    * Creates a new application context that binds a document with its view.
@@ -55,6 +98,11 @@ export class AcApContext {
 
     // Add entity to scene
     doc.database.events.entityAppended.addEventListener(args => {
+      if (this._isMobile) {
+        this.enqueueMobileEntityAppend(args.entity)
+        return
+      }
+
       this.view.addEntity(args.entity)
     })
 
@@ -128,5 +176,74 @@ export class AcApContext {
    */
   get doc(): AcApDocument {
     return this._doc
+  }
+
+  /**
+   * Resolves once all mobile-buffered entity append events have been forwarded
+   * to the view. Desktop keeps the original synchronous bridge and resolves
+   * immediately.
+   */
+  whenEntityAppendsIdle() {
+    if (!this._isMobile || !this.hasPendingEntityAppends()) {
+      return Promise.resolve()
+    }
+
+    return new Promise<void>(resolve => {
+      this._entityAppendIdleResolvers.push(resolve)
+      this.scheduleEntityAppendDrain()
+    })
+  }
+
+  private enqueueMobileEntityAppend(entity: AcDbEntity | AcDbEntity[]) {
+    if (Array.isArray(entity)) {
+      this._pendingEntityAppends.push(...entity)
+    } else {
+      this._pendingEntityAppends.push(entity)
+    }
+    this.scheduleEntityAppendDrain()
+  }
+
+  private scheduleEntityAppendDrain() {
+    if (this._isEntityAppendDrainScheduled) return
+
+    this._isEntityAppendDrainScheduled = true
+    scheduleMobileBridgeTask(() => this.drainEntityAppendBuffer())
+  }
+
+  private drainEntityAppendBuffer() {
+    this._isEntityAppendDrainScheduled = false
+
+    const chunk = this._pendingEntityAppends.splice(
+      0,
+      MOBILE_ENTITY_APPEND_CHUNK_SIZE
+    )
+    if (chunk.length > 0) {
+      try {
+        this.view.addEntity(chunk)
+      } catch (error) {
+        log.error('[AcApContext] Failed to add buffered entities:', error)
+      }
+    }
+
+    if (this._pendingEntityAppends.length > 0) {
+      this.scheduleEntityAppendDrain()
+      return
+    }
+
+    this.resolveEntityAppendIdle()
+  }
+
+  private hasPendingEntityAppends() {
+    return (
+      this._pendingEntityAppends.length > 0 ||
+      this._isEntityAppendDrainScheduled
+    )
+  }
+
+  private resolveEntityAppendIdle() {
+    if (this.hasPendingEntityAppends()) return
+
+    const resolvers = this._entityAppendIdleResolvers.splice(0)
+    resolvers.forEach(resolve => resolve())
   }
 }

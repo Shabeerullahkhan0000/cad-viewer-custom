@@ -74,7 +74,8 @@ import {
   AcEdCommand,
   AcEdCommandStack,
   AcEdOpenMode,
-  eventBus
+  eventBus,
+  setEventBusBulkLoading
 } from '../editor'
 import { AcApI18n } from '../i18n'
 import { AcApPluginManager } from '../plugin/AcApPluginManager'
@@ -86,6 +87,17 @@ import { AcApProgress } from './AcApProgress'
 import { AcApOpenDatabaseOptions } from './AcDbOpenDatabaseOptions'
 
 const DEFAULT_BASE_URL = 'https://mlightcad.gitlab.io/cad-data/'
+const MOBILE_MTEXT_WORKER_DELAY_MS = 200
+
+const getIsMobile = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+
+  const isMobile = window.matchMedia('(pointer: coarse)').matches
+  return isMobile
+}
+
 /**
  * Built-in command alias table used when users do not provide explicit alias overrides.
  *
@@ -322,6 +334,14 @@ export class AcApDocManager {
    * registering built-in and system-variable commands.
    */
   private _commandAliasOverrides: Map<string, string[]>
+  /** Mobile gate used to keep desktop startup and command behavior unchanged. */
+  private readonly _isMobile = getIsMobile()
+  /** Worker URLs passed by the host app; reused for file-type converter registration. */
+  private _webworkerFileUrls?: AcApWebworkerFiles
+  /** Worker-backed converters that have already replaced the default converters. */
+  private _registeredWorkerConverters = new Set<AcDbFileType>()
+  /** Timer used to stagger MTEXT worker creation on mobile startup. */
+  private _mtextWorkerInitTimer?: ReturnType<typeof setTimeout>
   /** Singleton instance */
   private static _instance?: AcApDocManager
 
@@ -669,6 +689,7 @@ export class AcApDocManager {
    */
   async openUrl(url: string, options?: AcApOpenDatabaseOptions) {
     options = this.setOptions(options)
+    this.ensureConverterForFileType(this.getFileTypeFromName(url))
     this.onBeforeOpenDocument(options)
     // TODO: The correct way is to create one new context instead of using old context and document
     const isSuccess = await this.context.doc.openUri(url, options)
@@ -700,6 +721,7 @@ export class AcApDocManager {
     options: AcApOpenDatabaseOptions
   ) {
     options = this.setOptions(options)
+    this.ensureConverterForFileType(this.getFileTypeFromName(fileName))
     this.onBeforeOpenDocument(options)
     // TODO: The correct way is to create one new context instead of using old context and document
     const isSuccess = await this.context.doc.openDocument(
@@ -824,6 +846,20 @@ export class AcApDocManager {
       )
     }
 
+    addSystemCommand('open', 'open', new AcApOpenCmd())
+    addSystemCommand('pan', 'pan', new AcApPanCmd())
+    addSystemCommand('zoom', 'zoom', new AcApZoomCmd())
+    addSystemCommand(
+      'measuredistance',
+      'measuredistance',
+      new AcApMeasureDistanceCmd()
+    )
+    addSystemCommand('switchbg', 'switchbg', new AcApSwitchBgCmd())
+
+    if (this._isMobile) {
+      return
+    }
+
     addSystemCommand('arc', 'arc', new AcApArcCmd())
     addSystemCommand('circle', 'circle', new AcApCircleCmd())
     addSystemCommand('cdxf', 'cdxf', new AcApConvertToDxfCmd())
@@ -832,11 +868,6 @@ export class AcApDocManager {
     addSystemCommand('ellipse', 'ellipse', new AcApEllipseCmd())
     addSystemCommand('erase', 'erase', new AcApEraseCmd())
     addSystemCommand('dimlinear', 'dimlinear', new AcApDimLinearCmd())
-    addSystemCommand(
-      'measuredistance',
-      'measuredistance',
-      new AcApMeasureDistanceCmd()
-    )
     addSystemCommand('measurearea', 'measurearea', new AcApMeasureAreaCmd())
     addSystemCommand('measureangle', 'measureangle', new AcApMeasureAngleCmd())
     addSystemCommand('measurearc', 'measurearc', new AcApMeasureArcCmd())
@@ -866,8 +897,6 @@ export class AcApDocManager {
     addSystemCommand('move', 'move', new AcApMoveCmd())
     addSystemCommand('rotate', 'rotate', new AcApRotateCmd())
     addSystemCommand('log', 'log', new AcApLogCmd())
-    addSystemCommand('open', 'open', new AcApOpenCmd())
-    addSystemCommand('pan', 'pan', new AcApPanCmd())
     addSystemCommand('point', 'point', new AcApPointCmd())
     addSystemCommand('polygon', 'polygon', new AcApPolygonCmd())
     addSystemCommand('pline', 'pline', new AcApPolylineCmd())
@@ -882,9 +911,7 @@ export class AcApDocManager {
     addSystemCommand('select', 'select', new AcApSelectCmd())
     addSystemCommand('sketch', 'sketch', new AcApSketchCmd())
     addSystemCommand('spline', 'spline', new AcApSplineCmd())
-    addSystemCommand('switchbg', 'switchbg', new AcApSwitchBgCmd())
     addSystemCommand('xline', 'xline', new AcApXLineCmd())
-    addSystemCommand('zoom', 'zoom', new AcApZoomCmd())
 
     // Register system variables as commands
     const sysVars = AcDbSysVarManager.instance().getAllDescriptors()
@@ -1062,11 +1089,19 @@ export class AcApDocManager {
    * @protected
    */
   protected onBeforeOpenDocument(options?: AcApOpenDatabaseOptions) {
+    if (this._isMobile) {
+      setEventBusBulkLoading(true)
+    }
+
     this.events.documentToBeOpened.dispatch({
       doc: this.context.doc,
       mode: this.getDocumentEventMode(options)
     })
     this.curView.clear()
+
+    if (this._isMobile) {
+      this.curView.beginMobileBulkLoad()
+    }
   }
 
   /**
@@ -1083,6 +1118,10 @@ export class AcApDocManager {
     isSuccess: boolean,
     options?: AcApOpenDatabaseOptions
   ) {
+    if (this._isMobile) {
+      setEventBusBulkLoading(false)
+    }
+
     if (isSuccess) {
       const doc = this.context.doc
       this.events.documentActivated.dispatch({
@@ -1099,6 +1138,19 @@ export class AcApDocManager {
         this.curView.zoomTo(new AcGeBox2d(db.extmin, db.extmax))
       }
     }
+
+    if (this._isMobile) {
+      this.finishMobileBulkLoadAfterEntityBridge()
+    }
+  }
+
+  private finishMobileBulkLoadAfterEntityBridge() {
+    this.context
+      .whenEntityAppendsIdle()
+      .then(() => this.curView.endMobileBulkLoad())
+      .catch(error => {
+        log.error('[AcApDocManager] Failed to finish mobile bulk load:', error)
+      })
   }
 
   /**
@@ -1164,42 +1216,94 @@ export class AcApDocManager {
    * without throwing exceptions, ensuring that the application can continue to function
    * even if one or more converters fail to register.
    */
-  private registerConverters(webworkerFileUrls?: AcApWebworkerFiles) {
-    // Register DXF converter
-    try {
-      const converter = new AcDbDxfConverter({
-        convertByEntityType: false,
-        useWorker: true,
-        parserWorkerUrl:
-          webworkerFileUrls && webworkerFileUrls.dxfParser
-            ? webworkerFileUrls.dxfParser
-            : './assets/dxf-parser-worker.js'
-      })
-      AcDbDatabaseConverterManager.instance.register(
-        AcDbFileType.DXF,
-        converter
-      )
-    } catch (error) {
-      log.error('Failed to register dxf converter: ', error)
+  private registerConverters(
+    webworkerFileUrls?: AcApWebworkerFiles,
+    fileType?: AcDbFileType
+  ) {
+    if (
+      (!fileType || fileType === AcDbFileType.DXF) &&
+      !this._registeredWorkerConverters.has(AcDbFileType.DXF)
+    ) {
+      try {
+        const converter = new AcDbDxfConverter({
+          convertByEntityType: false,
+          useWorker: true,
+          parserWorkerUrl:
+            webworkerFileUrls && webworkerFileUrls.dxfParser
+              ? webworkerFileUrls.dxfParser
+              : './assets/dxf-parser-worker.js'
+        })
+        AcDbDatabaseConverterManager.instance.register(
+          AcDbFileType.DXF,
+          converter
+        )
+        this._registeredWorkerConverters.add(AcDbFileType.DXF)
+      } catch (error) {
+        log.error('Failed to register dxf converter: ', error)
+      }
     }
 
-    // Register DWG converter
+    if (
+      (!fileType || fileType === AcDbFileType.DWG) &&
+      !this._registeredWorkerConverters.has(AcDbFileType.DWG)
+    ) {
+      try {
+        const converter = new AcDbLibreDwgConverter({
+          convertByEntityType: false,
+          useWorker: true,
+          parserWorkerUrl:
+            webworkerFileUrls && webworkerFileUrls.dwgParser
+              ? webworkerFileUrls.dwgParser
+              : './assets/libredwg-parser-worker.js'
+        })
+        AcDbDatabaseConverterManager.instance.register(
+          AcDbFileType.DWG,
+          converter
+        )
+        this._registeredWorkerConverters.add(AcDbFileType.DWG)
+      } catch (error) {
+        log.error('Failed to register dwg converter: ', error)
+      }
+    }
+  }
+
+  private ensureConverterForFileType(fileType: AcDbFileType) {
+    if (this._isMobile) {
+      this.registerConverters(this._webworkerFileUrls, fileType)
+      return
+    }
+
+    this.registerConverters(this._webworkerFileUrls)
+  }
+
+  private getFileTypeFromName(fileNameOrUrl: string): AcDbFileType {
+    const cleanName = fileNameOrUrl.split(/[?#]/)[0].toLowerCase()
+    return cleanName.endsWith('.dwg') ? AcDbFileType.DWG : AcDbFileType.DXF
+  }
+
+  private initializeMTextWorker(webworkerFileUrls?: AcApWebworkerFiles) {
     try {
-      const converter = new AcDbLibreDwgConverter({
-        convertByEntityType: false,
-        useWorker: true,
-        parserWorkerUrl:
-          webworkerFileUrls && webworkerFileUrls.dwgParser
-            ? webworkerFileUrls.dwgParser
-            : './assets/libredwg-parser-worker.js'
-      })
-      AcDbDatabaseConverterManager.instance.register(
-        AcDbFileType.DWG,
-        converter
+      AcTrMTextRenderer.getInstance().initialize(
+        webworkerFileUrls && webworkerFileUrls.mtextRender
+          ? webworkerFileUrls.mtextRender
+          : './assets/mtext-renderer-worker.js'
       )
     } catch (error) {
-      log.error('Failed to register dwg converter: ', error)
+      log.error('Failed to initialize mtext worker: ', error)
     }
+  }
+
+  private scheduleMTextWorkerInitialization(
+    webworkerFileUrls?: AcApWebworkerFiles
+  ) {
+    if (this._mtextWorkerInitTimer != null) {
+      clearTimeout(this._mtextWorkerInitTimer)
+    }
+
+    this._mtextWorkerInitTimer = setTimeout(() => {
+      this._mtextWorkerInitTimer = undefined
+      this.initializeMTextWorker(webworkerFileUrls)
+    }, MOBILE_MTEXT_WORKER_DELAY_MS)
   }
 
   /**
@@ -1215,12 +1319,15 @@ export class AcApDocManager {
    * initialization are handled inside the respective registration routines.
    */
   private registerWorkers(webworkerFileUrls?: AcApWebworkerFiles) {
+    this._webworkerFileUrls = webworkerFileUrls
+
+    if (this._isMobile) {
+      this.scheduleMTextWorkerInitialization(webworkerFileUrls)
+      return
+    }
+
     this.registerConverters(webworkerFileUrls)
-    AcTrMTextRenderer.getInstance().initialize(
-      webworkerFileUrls && webworkerFileUrls.mtextRender
-        ? webworkerFileUrls.mtextRender
-        : './assets/mtext-renderer-worker.js'
-    )
+    this.initializeMTextWorker(webworkerFileUrls)
   }
 
   /**

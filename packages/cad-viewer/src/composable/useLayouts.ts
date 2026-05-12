@@ -1,10 +1,23 @@
-import { AcApDocManager } from '@mlightcad/cad-simple-viewer'
+import {
+  AcApDocManager,
+  AcDbDocumentEventArgs,
+  isEventBusBulkLoading
+} from '@mlightcad/cad-simple-viewer'
 import {
   AcDbDatabase,
   acdbHostApplicationServices,
   AcDbObjectId
 } from '@mlightcad/data-model'
-import { reactive } from 'vue'
+import { onScopeDispose, reactive } from 'vue'
+
+const getIsMobile = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+
+  const isMobile = window.matchMedia('(pointer: coarse)').matches
+  return isMobile
+}
 
 export interface LayoutInfo {
   name: string
@@ -15,7 +28,12 @@ export interface LayoutInfo {
 
 export function useLayouts(editor: AcApDocManager) {
   const reactiveLayouts = reactive<LayoutInfo[]>([])
+  const isMobile = getIsMobile()
   const doc = editor.curDocument
+  let hasBufferedLayoutSwitch = false
+  let bufferedActiveLayoutName: string | undefined
+  const shouldBufferBulkLoadEvents = () =>
+    isMobile && isEventBusBulkLoading()
 
   const reset = (doc: AcDbDatabase) => {
     const layouts = doc.objects.layout.newIterator()
@@ -32,23 +50,45 @@ export function useLayouts(editor: AcApDocManager) {
   }
   reset(doc.database)
 
-  editor.events.documentActivated.addEventListener(args => {
+  const applyActiveLayout = (layoutName: string) => {
+    reactiveLayouts.forEach(layout => {
+      layout.isActive = layout.name == layoutName
+    })
+  }
+
+  const handleDocumentActivated = (args: AcDbDocumentEventArgs) => {
     reactiveLayouts.length = 0
     reset(args.doc.database)
-  })
+    if (hasBufferedLayoutSwitch && bufferedActiveLayoutName) {
+      applyActiveLayout(bufferedActiveLayoutName)
+    }
+    hasBufferedLayoutSwitch = false
+    bufferedActiveLayoutName = undefined
+  }
+
+  const handleLayoutSwitched = (args: { layout: { layoutName: string } }) => {
+    const newLayout = args.layout
+    if (shouldBufferBulkLoadEvents()) {
+      hasBufferedLayoutSwitch = true
+      bufferedActiveLayoutName = newLayout.layoutName
+      return
+    }
+
+    applyActiveLayout(newLayout.layoutName)
+  }
+
+  editor.events.documentActivated.addEventListener(handleDocumentActivated)
 
   acdbHostApplicationServices().layoutManager.events.layoutSwitched.addEventListener(
-    args => {
-      const newLayout = args.layout
-      reactiveLayouts.forEach(layout => {
-        if (layout.name == newLayout.layoutName) {
-          layout.isActive = true
-        } else {
-          layout.isActive = false
-        }
-      })
-    }
+    handleLayoutSwitched
   )
+
+  onScopeDispose(() => {
+    editor.events.documentActivated.removeEventListener(handleDocumentActivated)
+    acdbHostApplicationServices().layoutManager.events.layoutSwitched.removeEventListener(
+      handleLayoutSwitched
+    )
+  })
 
   return reactiveLayouts
 }

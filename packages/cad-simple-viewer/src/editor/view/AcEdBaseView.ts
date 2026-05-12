@@ -21,6 +21,17 @@ import {
 } from './AcEdSelectionAction'
 import { AcEdSpatialQueryResultItemEx } from './AcEdSpatialQueryResult'
 
+const getIsMobileInput = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+
+  const isMobile = window.matchMedia('(pointer: coarse)').matches
+  return isMobile
+}
+
+const SYNTHETIC_MOUSE_SUPPRESSION_MS = 700
+
 /**
  * Interface to define arguments of mouse event events.
  */
@@ -224,6 +235,21 @@ export abstract class AcEdBaseView {
 
   /** The HTML element to contain this view */
   protected _container: HTMLElement
+  /** True only for coarse-pointer/touch-first devices. */
+  private readonly _isMobileInput = getIsMobileInput()
+  /** Tracks an active touch pointer so synthetic mouse events can be ignored. */
+  private _isTouchActive = false
+  /** Timestamp of the latest touch pointer event for delayed synthetic mouse events. */
+  private _lastTouchInputAt = 0
+  /** Latest mobile mousemove waiting for the next animation frame. */
+  private _pendingMouseMoveViewportPoint: AcGePoint2dLike | null = null
+  /** requestAnimationFrame id for mobile mouse coordinate coalescing. */
+  private _mouseMoveRafId: number | null = null
+  /** Last mobile coordinate transform, reused between animation frames. */
+  private _lastMobileMouseTransform: {
+    canvas: AcGePoint2d
+    world: AcGePoint2d
+  } | null = null
 
   /** Events fired by the view for various interactions */
   public readonly events = {
@@ -262,14 +288,18 @@ export abstract class AcEdBaseView {
     this._curMousePos = new AcGePoint2d()
     this._selectionSet = new AcEdSelectionSet()
     this._editor = new AcEditor(this)
+    this.applyMobileTouchStyles()
+    this.registerMobileTouchHandlers()
     this._canvas.addEventListener('mousemove', event => this.onMouseMove(event))
     this._canvas.addEventListener('mousedown', event => {
+      if (this.shouldIgnoreMouseEvent(event)) return
       if (event.button === 1) {
         // Middle mouse button (button === 1)
         this._editor.setCursor(AcEdCorsorType.Grab)
       }
     })
     this._canvas.addEventListener('mouseup', event => {
+      if (this.shouldIgnoreMouseEvent(event)) return
       if (event.button === 1) {
         // Middle mouse button (button === 1)
         this._editor.restoreCursor()
@@ -303,6 +333,44 @@ export abstract class AcEdBaseView {
    */
   get editor() {
     return this._editor
+  }
+
+  /**
+   * Whether this view is running on a touch-first/coarse-pointer device.
+   */
+  protected get isMobileInput() {
+    return this._isMobileInput
+  }
+
+  /**
+   * Whether a touch pointer is currently active on this view.
+   */
+  protected get isTouchActive() {
+    return this._isTouchActive
+  }
+
+  /**
+   * Mobile browsers may emit compatibility mouse events after touch/pointer
+   * input. View-level mouse handlers should skip those events so one gesture is
+   * processed once by the pointer/gesture stack.
+   */
+  protected shouldIgnoreMouseEvent(event?: MouseEvent) {
+    if (!this._isMobileInput) return false
+
+    const sourceCapabilities = (
+      event as
+        | (MouseEvent & {
+            sourceCapabilities?: { firesTouchEvents?: boolean }
+          })
+        | undefined
+    )?.sourceCapabilities
+
+    return (
+      this._isTouchActive ||
+      sourceCapabilities?.firesTouchEvents === true ||
+      this.getInputTimestamp() - this._lastTouchInputAt <
+        SYNTHETIC_MOUSE_SUPPRESSION_MS
+    )
   }
 
   /**
@@ -899,13 +967,137 @@ export abstract class AcEdBaseView {
    * @param event Input mouse event argument
    */
   private onMouseMove(event: MouseEvent) {
-    // Keep one canonical conversion path for all view input code.
-    this._curMousePos = this.viewportToCanvas({
+    if (this.shouldIgnoreMouseEvent(event)) return
+
+    if (this._isMobileInput) {
+      this._pendingMouseMoveViewportPoint = {
+        x: event.clientX,
+        y: event.clientY
+      }
+
+      if (this._mouseMoveRafId != null) {
+        if (this._lastMobileMouseTransform) {
+          this._curMousePos = new AcGePoint2d(
+            this._lastMobileMouseTransform.canvas
+          )
+          this._curPos.copy(this._lastMobileMouseTransform.world)
+        }
+        return
+      }
+
+      this._mouseMoveRafId = requestAnimationFrame(() => {
+        this._mouseMoveRafId = null
+        const point = this._pendingMouseMoveViewportPoint
+        this._pendingMouseMoveViewportPoint = null
+        if (!point) return
+        this.updateMousePositionFromViewport(point)
+      })
+      return
+    }
+
+    this.updateMousePositionFromViewport({
       x: event.clientX,
       y: event.clientY
     })
+  }
+
+  private applyMobileTouchStyles() {
+    if (!this._isMobileInput) return
+
+    const elements = [this._container, this._canvas]
+    elements.forEach(element => {
+      element.style.setProperty('touch-action', 'none')
+      element.style.setProperty('user-select', 'none')
+      element.style.setProperty('-webkit-user-select', 'none')
+      element.style.setProperty('-webkit-touch-callout', 'none')
+    })
+  }
+
+  private registerMobileTouchHandlers() {
+    if (!this._isMobileInput) return
+
+    const options: AddEventListenerOptions = { passive: false }
+    this._canvas.addEventListener(
+      'pointerdown',
+      event => this.handleMobileTouchPointer(event),
+      options
+    )
+    this._canvas.addEventListener(
+      'pointermove',
+      event => this.handleMobileTouchPointer(event),
+      options
+    )
+    this._canvas.addEventListener(
+      'pointerup',
+      event => this.handleMobileTouchPointer(event),
+      options
+    )
+    this._canvas.addEventListener(
+      'pointercancel',
+      event => this.handleMobileTouchPointer(event),
+      options
+    )
+  }
+
+  private handleMobileTouchPointer(event: PointerEvent) {
+    if (!this._isMobileInput || event.pointerType !== 'touch') return
+
+    this._lastTouchInputAt = this.getInputTimestamp()
+    this._isTouchActive =
+      event.type !== 'pointerup' && event.type !== 'pointercancel'
+
+    if (event.type === 'pointerdown') {
+      this.captureTouchPointer(event)
+    } else if (event.type === 'pointerup' || event.type === 'pointercancel') {
+      this.releaseTouchPointer(event)
+    }
+
+    if (!this._editor.isActive && event.cancelable) {
+      event.preventDefault()
+    }
+  }
+
+  private captureTouchPointer(event: PointerEvent) {
+    if (!this._canvas.setPointerCapture) return
+
+    try {
+      if (!this._canvas.hasPointerCapture?.(event.pointerId)) {
+        this._canvas.setPointerCapture(event.pointerId)
+      }
+    } catch {
+      // Some embedded WebViews can throw when the pointer is already released.
+    }
+  }
+
+  private releaseTouchPointer(event: PointerEvent) {
+    if (!this._canvas.releasePointerCapture) return
+
+    try {
+      if (this._canvas.hasPointerCapture?.(event.pointerId)) {
+        this._canvas.releasePointerCapture(event.pointerId)
+      }
+    } catch {
+      // Ignore stale pointer ids from cancelled mobile gestures.
+    }
+  }
+
+  private getInputTimestamp() {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now()
+  }
+
+  private updateMousePositionFromViewport(point: AcGePoint2dLike) {
+    // Keep one canonical conversion path for all view input code.
+    this._curMousePos = this.viewportToCanvas(point)
     const wcsPos = this.screenToWorld(this._curMousePos)
     this._curPos.copy(wcsPos)
+
+    if (this._isMobileInput) {
+      this._lastMobileMouseTransform = {
+        canvas: new AcGePoint2d(this._curMousePos),
+        world: new AcGePoint2d(wcsPos)
+      }
+    }
+
     this.events.mouseMove.dispatch({ x: wcsPos.x, y: wcsPos.y })
 
     // Hover handler

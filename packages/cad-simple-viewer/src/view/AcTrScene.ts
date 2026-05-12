@@ -89,6 +89,8 @@ export class AcTrScene {
   private _transientManager: AcTrTransientManager
   /** HTML transient elements manager */
   private _htmlTransientManager: AcTrHtmlTransientManager
+  /** True when layout spatial indexes should collect items for a later bulk load. */
+  private _isSpatialIndexBuildDeferred: boolean
 
   /**
    * Creates a new CAD scene instance.
@@ -103,6 +105,7 @@ export class AcTrScene {
     this._layouts = new Map()
     this._activeLayoutBtrId = ''
     this._modelSpaceBtrId = ''
+    this._isSpatialIndexBuildDeferred = false
   }
 
   /**
@@ -138,6 +141,17 @@ export class AcTrScene {
    */
   get internalScene() {
     return this._scene
+  }
+
+  get isSpatialIndexBuildDeferred() {
+    return this._isSpatialIndexBuildDeferred
+  }
+
+  set isSpatialIndexBuildDeferred(value: boolean) {
+    this._isSpatialIndexBuildDeferred = value
+    this._layouts.forEach(layout => {
+      layout.isSpatialIndexBuildDeferred = value
+    })
   }
 
   /**
@@ -248,6 +262,7 @@ export class AcTrScene {
    */
   addEmptyLayout(ownerId: AcDbObjectId) {
     const layout = new AcTrLayout()
+    layout.isSpatialIndexBuildDeferred = this._isSpatialIndexBuildDeferred
     this._layouts.set(ownerId, layout)
     this._scene.add(layout.internalObject)
     layout.visible = ownerId == this._activeLayoutBtrId
@@ -274,6 +289,13 @@ export class AcTrScene {
     this._scene.clear()
     this._transientManager = new AcTrTransientManager(this._scene)
     this._htmlTransientManager = new AcTrHtmlTransientManager(this._scene)
+    this._isSpatialIndexBuildDeferred = false
+    return this
+  }
+
+  flushDeferredSpatialIndex() {
+    this._layouts.forEach(layout => layout.flushDeferredSpatialIndex())
+    this._isSpatialIndexBuildDeferred = false
     return this
   }
 

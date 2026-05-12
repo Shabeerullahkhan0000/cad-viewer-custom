@@ -1,6 +1,7 @@
 import {
   AcApDocManager,
-  AcDbDocumentEventArgs
+  AcDbDocumentEventArgs,
+  isEventBusBulkLoading
 } from '@mlightcad/cad-simple-viewer'
 import {
   AcCmColor,
@@ -12,6 +13,15 @@ import {
   AcDbSysVarManager
 } from '@mlightcad/data-model'
 import { computed, onScopeDispose, reactive, ref } from 'vue'
+
+const getIsMobile = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+
+  const isMobile = window.matchMedia('(pointer: coarse)').matches
+  return isMobile
+}
 
 export interface LayerInfo {
   name: string
@@ -42,9 +52,13 @@ export function useLayers(editor: AcApDocManager) {
   const layerLockedFlag = 0x04
   const reactiveLayers = reactive<LayerInfo[]>([])
   const currentLayerNameState = ref('')
+  const isMobile = getIsMobile()
   let observedDatabase: AcDbDatabase | undefined
+  let hasBufferedLayerEvents = false
 
   const getCurrentDatabase = () => editor.curDocument?.database
+  const shouldBufferBulkLoadEvents = () =>
+    isMobile && isEventBusBulkLoading()
   const syncCurrentLayerName = (db = getCurrentDatabase()) => {
     currentLayerNameState.value = db?.clayer || ''
   }
@@ -106,10 +120,20 @@ export function useLayers(editor: AcApDocManager) {
   }
 
   const handleLayerAppended = (args: AcDbLayerEventArgs) => {
+    if (shouldBufferBulkLoadEvents()) {
+      hasBufferedLayerEvents = true
+      return
+    }
+
     upsertLayerInfo(args.layer)
   }
 
   const handleLayerModified = (args: AcDbLayerModifiedEventArgs) => {
+    if (shouldBufferBulkLoadEvents()) {
+      hasBufferedLayerEvents = true
+      return
+    }
+
     const info = findLayerInfo(args.layer.name)
     if (!info) {
       upsertLayerInfo(args.layer)
@@ -140,12 +164,22 @@ export function useLayers(editor: AcApDocManager) {
   }
 
   const handleDocumentActivated = (args: AcDbDocumentEventArgs) => {
+    const shouldFlushBufferedEvents = hasBufferedLayerEvents
     bindDatabase(args.doc.database)
+    if (shouldFlushBufferedEvents) {
+      syncCurrentLayerName(args.doc.database)
+    }
+    hasBufferedLayerEvents = false
   }
 
   const handleSysVarChanged = (args: AcDbSysVarEventArgs) => {
     if (args.database !== observedDatabase) return
     if (args.name.toUpperCase() !== 'CLAYER') return
+    if (shouldBufferBulkLoadEvents()) {
+      hasBufferedLayerEvents = true
+      return
+    }
+
     syncCurrentLayerName(args.database)
   }
 

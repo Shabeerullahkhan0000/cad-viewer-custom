@@ -27,6 +27,10 @@ const EXAMPLE_COMMAND_ALIASES = {
   ZOOM: ['ZZ']
 }
 
+const isMobile = window.matchMedia('(pointer: coarse)').matches
+const MOBILE_MINIMUM_CHUNK_SIZE = 100
+const DESKTOP_MINIMUM_CHUNK_SIZE = 1000
+
 class CadViewerApp {
   private container: HTMLDivElement
   private fileInput: HTMLInputElement
@@ -222,7 +226,9 @@ class CadViewerApp {
     try {
       const fileContent = await this.readFile(file)
       const options: AcApOpenDatabaseOptions = {
-        minimumChunkSize: 1000,
+        minimumChunkSize: isMobile
+          ? MOBILE_MINIMUM_CHUNK_SIZE
+          : DESKTOP_MINIMUM_CHUNK_SIZE,
         mode: AcEdOpenMode.Write,
         // Override line weight display setting to false so that line weights are not displayed by default
         sysVars: {
@@ -255,7 +261,9 @@ class CadViewerApp {
 
     try {
       const options: AcApOpenDatabaseOptions = {
-        minimumChunkSize: 1000,
+        minimumChunkSize: isMobile
+          ? MOBILE_MINIMUM_CHUNK_SIZE
+          : DESKTOP_MINIMUM_CHUNK_SIZE,
         mode: AcEdOpenMode.Write
       }
 

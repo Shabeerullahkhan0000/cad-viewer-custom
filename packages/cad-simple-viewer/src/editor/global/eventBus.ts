@@ -61,6 +61,11 @@ export type AcEdEvents = {
     /** Number of entities that require this font */
     count: number
   }
+  /** Emitted when mobile bulk-loading starts or ends. */
+  'bulk-loading-changed': {
+    /** True while mobile initial document load should suppress reactive churn. */
+    isLoading: boolean
+  }
 }
 
 /**
@@ -102,3 +107,16 @@ export type AcEdEvents = {
  * ```
  */
 export const eventBus: Emitter<AcEdEvents> = mitt<AcEdEvents>()
+
+const eventBusState = {
+  isBulkLoading: false
+}
+
+export const isEventBusBulkLoading = () => eventBusState.isBulkLoading
+
+export const setEventBusBulkLoading = (isLoading: boolean) => {
+  if (eventBusState.isBulkLoading === isLoading) return
+
+  eventBusState.isBulkLoading = isLoading
+  eventBus.emit('bulk-loading-changed', { isLoading })
+}

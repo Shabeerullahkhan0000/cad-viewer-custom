@@ -45,6 +45,11 @@ export interface AcTrLayoutStats {
   }
 }
 
+interface AcTrDeferredSpatialIndexEntry {
+  item: AcEdSpatialQueryResultItem
+  childItems?: AcEdSpatialQueryResultItem[]
+}
+
 /**
  * This class represents objects contained in one AutoCAD layout (model space or paper space).
  *
@@ -73,6 +78,13 @@ export class AcTrLayout {
   private _group: THREE.Group
   /** Spatial index tree for efficient entity queries */
   private _spatialIndex: AcTrHierarchicalSpatialIndex
+  /** Defers expensive R-tree insertion during mobile document load. */
+  private _isSpatialIndexBuildDeferred: boolean
+  /** Spatial items collected while index insertion is deferred. */
+  private _deferredSpatialIndexEntries: Map<
+    AcDbObjectId,
+    AcTrDeferredSpatialIndexEntry
+  >
   /** Bounding box containing all entities in this layout */
   private _box: THREE.Box3
   /** Map of layers indexed by layer name */
@@ -87,6 +99,8 @@ export class AcTrLayout {
   constructor() {
     this._group = new THREE.Group()
     this._spatialIndex = new AcTrHierarchicalSpatialIndex()
+    this._isSpatialIndexBuildDeferred = false
+    this._deferredSpatialIndexEntries = new Map()
     this._box = new THREE.Box3()
     this._layers = new Map()
     this._isLoaded = false
@@ -134,6 +148,14 @@ export class AcTrLayout {
    */
   set isLoaded(value: boolean) {
     this._isLoaded = value
+  }
+
+  get isSpatialIndexBuildDeferred() {
+    return this._isSpatialIndexBuildDeferred
+  }
+
+  set isSpatialIndexBuildDeferred(value: boolean) {
+    this._isSpatialIndexBuildDeferred = value
   }
 
   /**
@@ -225,6 +247,8 @@ export class AcTrLayout {
     this._layers.clear()
     this._box.makeEmpty()
     this._spatialIndex.clear()
+    this._deferredSpatialIndexEntries.clear()
+    this._isSpatialIndexBuildDeferred = false
     return this
   }
 
@@ -290,18 +314,64 @@ export class AcTrLayout {
     // For infinitive line such as ray and xline, they are not used to extend box
     if (extendBbox) this._box.union(box)
 
-    this._spatialIndex.insert({
+    this.addEntityToSpatialIndex(entity)
+
+    return this
+  }
+
+  /**
+   * Bulk-loads any entity bounds collected while spatial indexing was deferred.
+   *
+   * This keeps mobile initial load from doing thousands of incremental R-tree
+   * mutations, while preserving the same query data after the load completes.
+   */
+  flushDeferredSpatialIndex() {
+    if (this._deferredSpatialIndexEntries.size === 0) {
+      this._isSpatialIndexBuildDeferred = false
+      return this
+    }
+
+    const entries = Array.from(this._deferredSpatialIndexEntries.values())
+    this._spatialIndex.load(entries.map(entry => entry.item))
+    entries.forEach(entry => {
+      if (entry.childItems) {
+        this._spatialIndex.ensureChildIndex(entry.item.id, entry.childItems)
+      }
+    })
+
+    this._deferredSpatialIndexEntries.clear()
+    this._isSpatialIndexBuildDeferred = false
+    return this
+  }
+
+  private addEntityToSpatialIndex(entity: AcTrEntity) {
+    const box = entity.box
+    const item = {
       minX: box.min.x,
       minY: box.min.y,
       maxX: box.max.x,
       maxY: box.max.y,
       id: entity.objectId
-    })
+    }
 
     // Some INSERT rendering paths split one block reference into multiple layer
     // groups (AcTrEntity instead of AcTrGroup). Keep child-box index via userData
     // so object snap can still resolve gsMark to sub-entities.
     const spatialIndexChildBoxes = this.getSpatialIndexChildBoxes(entity)
+    const childItems =
+      spatialIndexChildBoxes ??
+      (entity instanceof AcTrGroup ? entity.boxes : undefined)
+
+    if (this._isSpatialIndexBuildDeferred) {
+      this._deferredSpatialIndexEntries.set(entity.objectId, {
+        item,
+        childItems: childItems ? childItems.map(child => ({ ...child })) : undefined
+      })
+      return
+    }
+
+    this._spatialIndex.insert(item)
+
     if (spatialIndexChildBoxes) {
       this._spatialIndex.ensureChildIndex(
         entity.objectId,
@@ -311,8 +381,6 @@ export class AcTrLayout {
       // If it is one block group, build spatial index for entities in this block.
       this._spatialIndex.createChildIndex(entity)
     }
-
-    return this
   }
 
   /**
@@ -329,6 +397,7 @@ export class AcTrLayout {
       }
     }
     this._spatialIndex.removeById(objectId)
+    this._deferredSpatialIndexEntries.delete(objectId)
     return result
   }
 
